@@ -118,14 +118,13 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, ChatDotRound, User, Service, Promotion } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { getChatHistory, chatWithAI } from '../../api/spots'
 import { useUserStore } from '../../store/user'
 // 简单 markdown 解析，实际项目可用 marked.js
 import { marked } from 'marked'
 
 const router = useRouter()
 const userStore = useUserStore()
-const API_BASE = 'http://localhost:8000/api'
 
 // 状态定义
 const loading = ref(false)
@@ -143,13 +142,11 @@ const currentSpots = ref<any[]>([])
 const fetchSessions = async () => {
   // 实际应该有个专门的 /chat/sessions 接口，这里用 /chat/history 模拟
   try {
-    const res = await axios.get(`${API_BASE}/chat/history`, {
-      headers: { Authorization: `Bearer ${userStore.token}` }
-    })
+    const res = await getChatHistory()
 
     // 提取不重复的 session_id
     const sessionMap = new Map()
-    res.data.messages.forEach((msg: any) => {
+    res.messages.forEach((msg: any) => {
       if (msg.session_id && !sessionMap.has(msg.session_id)) {
         sessionMap.set(msg.session_id, {
           id: msg.session_id,
@@ -177,10 +174,8 @@ const fetchSessions = async () => {
 const loadHistory = async (sessionId: string) => {
   loading.value = true
   try {
-    const res = await axios.get(`${API_BASE}/chat/history?session_id=${sessionId}`, {
-      headers: { Authorization: `Bearer ${userStore.token}` }
-    })
-    messages.value = res.data.messages
+    const res = await getChatHistory({ session_id: sessionId })
+    messages.value = res.messages
     scrollToBottom()
   } catch (error) {
     console.error('加载历史记录失败:', error)
@@ -232,20 +227,18 @@ const handleSessionSelect = (index: string) => {
     scrollToBottom()
 
     try {
-      const res = await axios.post(`${API_BASE}/chat`, {
+      const res = await chatWithAI({
         message: text,
         session_id: currentSessionId.value
-      }, {
-        headers: { Authorization: `Bearer ${userStore.token}` }
       })
 
       // 添加 AI 回复
       messages.value.push({
         role: 'assistant',
-        content: res.data.reply,
-        intent: res.data.intent,
-        spots: res.data.spots,
-        sources: res.data.sources
+        content: res.reply,
+        intent: res.intent,
+        spots: res.spots,
+        sources: res.sources
       })
     } catch (error) {
       console.error('发送消息失败:', error)

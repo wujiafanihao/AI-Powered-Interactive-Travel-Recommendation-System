@@ -65,10 +65,9 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Location } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { getCities, getSpots, searchSpots as apiSearchSpots } from '../../api/spots'
 
 const router = useRouter()
-const API_BASE = 'http://localhost:8000/api' // 根据实际后端地址调整，可以写在 axios 拦截器里，这里为了简便
 
 // 状态定义
 const loading = ref(false)
@@ -92,8 +91,8 @@ const isSearchMode = computed(() => !!filters.q)
 // 获取城市列表
 const fetchCities = async () => {
   try {
-    const res = await axios.get(`${API_BASE}/spots/cities`)
-    cities.value = res.data.cities
+    const res = await getCities()
+    cities.value = res.cities
   } catch (error) {
     console.error('获取城市列表失败:', error)
   }
@@ -103,28 +102,25 @@ const fetchCities = async () => {
 const fetchSpots = async () => {
   loading.value = true
   try {
-    let url = ''
-    let params: any = {}
+    let res: any;
 
     if (isSearchMode.value) {
       // 搜索模式
-      url = `${API_BASE}/spots/search`
-      params = { q: filters.q, limit: pageSize.value }
+      res = await apiSearchSpots(filters.q, pageSize.value)
     } else {
       // 列表模式
-      url = `${API_BASE}/spots`
-      params = {
+      let params: any = {
         page: page.value,
         page_size: pageSize.value,
         sort_by: filters.sort_by
       }
       if (filters.city) params.city = filters.city
       if (filters.min_rating > 0) params.min_rating = filters.min_rating
+      res = await getSpots(params)
     }
 
-    const res = await axios.get(url, { params })
-    spots.value = res.data.items
-    total.value = res.data.total
+    spots.value = res.items
+    total.value = res.total
   } catch (error) {
     console.error('获取景点失败:', error)
     ElMessage.error('获取景点列表失败')

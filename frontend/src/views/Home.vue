@@ -148,7 +148,7 @@ const components = {
   Search, ChatDotRound, Location, StarFilled,
   Present, Sunset, MostlyCloudy, Camera, MapLocation, Bicycle
 }
-import request from '../api/request'
+import { getSceneRecommendations, getRecommendations } from '../api/spots'
 import { useUserStore } from '../store/user'
 
 const router = useRouter()
@@ -175,10 +175,8 @@ const recommendLoading = ref(false)
 const loadSceneSpots = async (sceneName: string) => {
   sceneLoading.value = true
   try {
-    const res = await request.get(`/api/recommend/scene/${encodeURIComponent(sceneName)}`, {
-      params: { n: 8 }
-    })
-    sceneSpots.value = res.data.items
+    const res = await getSceneRecommendations(sceneName, 8)
+    sceneSpots.value = res.items
   } catch (error) {
     console.error('加载场景推荐失败:', error)
   } finally {
@@ -192,10 +190,8 @@ const loadRecommendations = async () => {
 
   recommendLoading.value = true
   try {
-    const res = await request.get(`/api/recommend`, {
-      params: { n: 8 }
-    })
-    recommendations.value = res.data
+    const res = await getRecommendations(8)
+    recommendations.value = res.items || res
   } catch (error) {
     console.error('加载个性化推荐失败:', error)
   } finally {

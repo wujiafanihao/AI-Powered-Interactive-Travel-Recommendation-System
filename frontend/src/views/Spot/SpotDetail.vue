@@ -98,13 +98,12 @@ import {
   Document, Timer, Ticket, Warning,
   Star, StarFilled
 } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { getSpotDetail, getCollections, toggleCollection, recordBehavior } from '../../api/spots'
 import { useUserStore } from '../../store/user'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const API_BASE = 'http://localhost:8000/api'
 
 const spotId = Number(route.params.id)
 const loading = ref(true)
@@ -116,13 +115,13 @@ const startTime = ref(0)
 // 获取景点详情
 const fetchDetail = async () => {
   try {
-    const res = await axios.get(`${API_BASE}/spots/${spotId}`)
-    spot.value = res.data
+    const res = await getSpotDetail(spotId)
+    spot.value = res
 
     // 如果已登录，检查是否已收藏
     if (userStore.token) {
       checkCollection()
-      recordBehavior('view') // 记录浏览行为
+      recordUserBehavior('view') // 记录浏览行为
     }
   } catch (error: any) {
     console.error('获取详情失败:', error)
@@ -140,10 +139,8 @@ const fetchDetail = async () => {
 // 检查是否收藏
 const checkCollection = async () => {
   try {
-    const res = await axios.get(`${API_BASE}/recommend/collections`, {
-      headers: { Authorization: `Bearer ${userStore.token}` }
-    })
-    isCollected.value = res.data.items.some((item: any) => item.id === spotId)
+    const res = await getCollections()
+    isCollected.value = res.items.some((item: any) => item.id === spotId)
   } catch (error) {
     console.error('检查收藏状态失败:', error)
   }
@@ -158,11 +155,9 @@ const toggleCollect = async () => {
   }
 
   try {
-    const res = await axios.post(`${API_BASE}/recommend/collect/${spotId}`, {}, {
-      headers: { Authorization: `Bearer ${userStore.token}` }
-    })
-    isCollected.value = res.data.collected
-    ElMessage.success(res.data.message)
+    const res = await toggleCollection(spotId)
+    isCollected.value = res.collected
+    ElMessage.success(res.message)
   } catch (error) {
     console.error('操作失败:', error)
     ElMessage.error('操作失败')
@@ -177,22 +172,20 @@ const handleRate = async (val: number) => {
     return
   }
 
-  recordBehavior('rate', val)
+  recordUserBehavior('rate', val)
   ElMessage.success('评分成功，感谢您的评价！')
 }
 
 // 记录用户行为
-const recordBehavior = async (type: string, rating?: number, duration?: number) => {
+const recordUserBehavior = async (type: string, rating?: number, duration?: number) => {
   if (!userStore.token) return
 
   try {
-    await axios.post(`${API_BASE}/recommend/behavior`, {
+    await recordBehavior({
       spot_id: spotId,
       behavior_type: type,
       rating: rating,
       duration: duration
-    }, {
-      headers: { Authorization: `Bearer ${userStore.token}` }
     })
   } catch (error) {
     console.error('记录行为失败:', error)
@@ -213,7 +206,7 @@ onUnmounted(() => {
   if (userStore.token && spotId) {
     const duration = Math.round((Date.now() - startTime.value) / 1000)
     if (duration > 5) { // 停留超过5秒才算有效浏览
-      recordBehavior('duration', undefined, duration)
+      recordUserBehavior('duration', undefined, duration)
     }
   }
 })
