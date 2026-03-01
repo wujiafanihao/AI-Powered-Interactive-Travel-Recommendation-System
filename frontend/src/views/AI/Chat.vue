@@ -12,7 +12,8 @@
           <el-menu-item v-for="session in sessions" :key="session.id" :index="session.id">
             <el-icon><ChatDotRound /></el-icon>
             <template #title>
-              <span class="session-title">{{ session.title }}</span>
+              <span class="session-title" :title="session.title">{{ session.title }}</span>
+              <el-icon class="delete-icon" @click.stop="handleDeleteSession(session.id)"><Delete /></el-icon>
             </template>
           </el-menu-item>
         </el-menu>
@@ -117,11 +118,11 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, ChatDotRound, User, Service, Promotion } from '@element-plus/icons-vue'
-import { getChatHistory, chatWithAI } from '../../api/spots'
+import { Plus, ChatDotRound, User, Service, Promotion, Delete } from '@element-plus/icons-vue'
+import { getChatHistory, chatWithAI, deleteChatSession } from '../../api/spots'
 import { useUserStore } from '../../store/user'
-// 简单 markdown 解析，实际项目可用 marked.js
 import { marked } from 'marked'
+import { ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -204,6 +205,39 @@ const startNewChat = () => {
 const handleSessionSelect = (index: string) => {
   currentSessionId.value = index
   loadHistory(index)
+}
+
+// 删除会话
+const handleDeleteSession = async (sessionId: string) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个会话吗？删除后无法恢复。', '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    await deleteChatSession(sessionId)
+    ElMessage.success('会话已删除')
+
+    // 更新本地会话列表
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
+
+    // 如果删除的是当前会话
+    if (currentSessionId.value === sessionId) {
+      if (sessions.value.length > 0) {
+        // 切换到第一个会话
+        handleSessionSelect(sessions.value[0].id)
+      } else {
+        // 没有会话了，创建新会话
+        startNewChat()
+      }
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('删除会话失败:', error)
+      ElMessage.error('删除失败，请稍后重试')
+    }
+  }
 }
 
   // 发送消息
@@ -332,7 +366,18 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   display: inline-block;
-  width: 150px;
+  width: 120px;
+}
+
+.delete-icon {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.el-menu-item:hover .delete-icon {
+  opacity: 1;
+  color: #f56c6c;
 }
 
 .chat-main {

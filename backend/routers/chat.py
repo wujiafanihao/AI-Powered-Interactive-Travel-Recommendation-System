@@ -131,3 +131,27 @@ async def get_chat_history(
         messages.reverse()
 
     return {"messages": messages, "total": len(messages)}
+
+@router.delete("/session/{session_id}", summary="删除会话聊天记录")
+async def delete_chat_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    删除指定的会话聊天记录
+
+    大白话：从数据库中清除该用户这个会话的所有聊天记录
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM chat_history
+        WHERE user_id = ? AND session_id = ?
+    """, (current_user["id"], session_id))
+
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    return {"message": "会话已删除", "deleted_count": deleted_count}

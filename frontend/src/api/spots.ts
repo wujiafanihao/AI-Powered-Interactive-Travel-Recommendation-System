@@ -11,5 +11,6 @@ export const recordBehavior = (data: any): Promise<any> => api.post('/recommend/
 export const getCollections = (): Promise<any> => api.get('/recommend/collections')
 export const toggleCollection = (spotId: number): Promise<any> => api.post(`/recommend/collect/${spotId}`)
 
-export const chatWithAI = (data: { message: string, session_id?: string }): Promise<any> => api.post('/chat', data)
+export const chatWithAI = (data: { message: string, session_id?: string }): Promise<any> => api.post('/chat', data, { timeout: 0 })
 export const getChatHistory = (params?: any): Promise<any> => api.get('/chat/history', { params })
+export const deleteChatSession = (sessionId: string): Promise<any> => api.delete(`/chat/session/${sessionId}`)
