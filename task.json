@@ -1,0 +1,100 @@
+[
+  {
+    "id": 1,
+    "title": "项目初始化与环境搭建",
+    "requirements": "创建项目目录结构、.env、.gitignore、requirements.txt，初始化 Git 仓库，安装所有 Python 依赖到 conda xianyu 环境",
+    "goal": "搭建完整的项目骨架，确保所有依赖可用",
+    "status": "pending"
+  },
+  {
+    "id": 2,
+    "title": "SQLite 建模与景点数据导入",
+    "requirements": "设计7张核心数据表的建表SQL，编写 database.py 初始化数据库，编写 import_citydata.py 将352个城市CSV的33000+景点数据导入 SQLite spots 表，同时提取景点类型标签和适宜人群标签",
+    "goal": "完成数据库初始化和景点数据ETL管线",
+    "status": "pending"
+  },
+  {
+    "id": 3,
+    "title": "模拟用户数据生成",
+    "requirements": "编写 generate_mock_users.py 生成150个模拟用户、约15000条行为记录、约2000条收藏记录，数据存储到 citydata/ 目录下的 JSON 文件，并导入 SQLite。用户画像需覆盖不同年龄段、性别、旅行风格偏好，行为数据需与用户偏好高度相关",
+    "goal": "生成符合真实分布的模拟数据，支撑推荐算法测试",
+    "status": "pending"
+  },
+  {
+    "id": 4,
+    "title": "ChromaDB 向量嵌入构建",
+    "requirements": "编写 build_vectors.py，将景点介绍+小贴士+建议季节拼接为文档，使用 Qwen3-Embedding-8B 模型通过 ModelScope API 计算嵌入向量，存入 ChromaDB 的 spot_knowledge 集合。同时编写系统FAQ知识库并向量化存入 system_knowledge 集合",
+    "goal": "构建完整的 RAG 向量知识库",
+    "status": "pending"
+  },
+  {
+    "id": 5,
+    "title": "协同过滤推荐引擎",
+    "requirements": "实现基于用户的协同过滤算法：余弦相似度计算、K近邻用户选择(K=20)、加权预测评分、推荐列表生成与排序。包含详细公式注释和复杂度分析。编写对应单元测试",
+    "goal": "完成协同过滤核心算法模块",
+    "status": "pending"
+  },
+  {
+    "id": 6,
+    "title": "内容推荐引擎",
+    "requirements": "实现基于内容的推荐算法：景点28维特征提取（类型8维+季节4维+区域7维+人群6维+评分/时长/价格3维）、用户偏好建模、余弦相似度匹配。编写对应单元测试",
+    "goal": "完成内容推荐核心算法模块",
+    "status": "pending"
+  },
+  {
+    "id": 7,
+    "title": "混合推荐融合策略",
+    "requirements": "实现动态加权融合策略：根据用户行为数据量自动调整协同过滤与内容推荐权重，处理冷启动问题，生成可解释的推荐理由。编写对应单元测试",
+    "goal": "完成混合推荐引擎，输出带推荐理由的个性化列表",
+    "status": "pending"
+  },
+  {
+    "id": 8,
+    "title": "LangChain + RAG 管线",
+    "requirements": "基于 LangChain 集成 ModelScope API（DeepSeek-V3.2），实现 RAG 检索增强生成管线：问题向量化 → ChromaDB 检索 Top-5 → Prompt 组装 → LLM 生成回答。实现智能问答功能（景点信息问答+系统使用帮助）",
+    "goal": "完成 AI 问答核心功能",
+    "status": "pending"
+  },
+  {
+    "id": 9,
+    "title": "智能帮搜与意图识别",
+    "requirements": "实现自然语言意图识别（搜索/问答/闲聊三分类），实现搜索条件提取（城市/类型/季节/预算/人群），实现结构化查询构建与景点匹配检索",
+    "goal": "完成 AI 智能搜索功能",
+    "status": "pending"
+  },
+  {
+    "id": 10,
+    "title": "FastAPI 核心 API 开发",
+    "requirements": "实现用户认证（注册/登录/JWT）、景点CRUD、推荐接口、AI对话接口、用户行为记录接口。所有接口需有 Pydantic 数据校验和详细中文注释",
+    "goal": "完成后端所有 API 接口",
+    "status": "pending"
+  },
+  {
+    "id": 11,
+    "title": "Vue 前端项目初始化",
+    "requirements": "使用 Vite 创建 Vue 3 项目，配置 Element Plus、Vue Router、Pinia、Axios。建立适老化设计系统（大字体≥16px、高对比度、大按钮≥44x44px）",
+    "goal": "搭建前端项目骨架和设计系统",
+    "status": "pending"
+  },
+  {
+    "id": 12,
+    "title": "核心页面开发",
+    "requirements": "开发首页（场景入口+推荐流）、景点详情页、AI对话页、搜索结果页、个人中心页。实现响应式布局（手机/平板/PC），组件复用率≥60%",
+    "goal": "完成所有前端页面和交互功能",
+    "status": "pending"
+  },
+  {
+    "id": 13,
+    "title": "测试与优化",
+    "requirements": "编写单元测试（覆盖率≥70%），编写核心功能集成测试，优化 API 响应速度（平均<2秒），修复发现的 Bug",
+    "goal": "确保系统稳定性和性能达标",
+    "status": "pending"
+  },
+  {
+    "id": 14,
+    "title": "文档与收尾",
+    "requirements": "编写完整 README.md（含架构图、流程图、运行步骤、功能说明）、部署文档、用户手册、数据字典、接口文档。更新 GEMINI.md 项目上下文",
+    "goal": "完成所有文档交付物",
+    "status": "pending"
+  }
+]

@@ -1,0 +1,39 @@
+# ============================================
+# TravelAI 项目 Git 忽略规则
+# ============================================
+
+# --- 环境与隐私 ---
+.env
+*.env.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# --- 运行时数据 ---
+backend/data/
+*.db
+
+# --- Node.js ---
+node_modules/
+frontend/dist/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- 日志 ---
+*.log
+logs/
+
+# --- 临时文件 ---
+tmp/
+temp/
