@@ -146,6 +146,22 @@ CREATE_TABLES_SQL = [
         FOREIGN KEY (user_id) REFERENCES users(id)
     );
     """,
+
+    # -------------------- 表8: 用户评论表 --------------------
+    # 存储用户对景点的评论
+    """
+    CREATE TABLE IF NOT EXISTS spot_comments (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id         INTEGER NOT NULL,
+        spot_id         INTEGER NOT NULL,
+        rating          REAL    NOT NULL CHECK(rating >= 1 AND rating <= 5),
+        content         TEXT    NOT NULL,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (spot_id) REFERENCES spots(id)
+    );
+    """,
 ]
 
 # 索引语句单独放，因为索引是用来加速查询的，和建表是两件事
@@ -166,6 +182,10 @@ CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_history(user_id);",
     # 按会话ID查聊天记录会很快
     "CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_history(session_id);",
+    # 查某个景点的评论会很快
+    "CREATE INDEX IF NOT EXISTS idx_comments_spot ON spot_comments(spot_id);",
+    # 查某个用户的评论会很快
+    "CREATE INDEX IF NOT EXISTS idx_comments_user ON spot_comments(user_id);",
 ]
 
 

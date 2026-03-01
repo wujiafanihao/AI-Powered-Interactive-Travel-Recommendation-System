@@ -83,22 +83,104 @@
             <h3 class="section-title"><el-icon><Warning /></el-icon> 游玩小贴士</h3>
             <p>{{ spot.tips }}</p>
           </div>
+
+          <!-- 用户评论区域 -->
+          <div class="section comments-section">
+            <h3 class="section-title"><el-icon><ChatDotRound /></el-icon> 用户评价 ({{ comments.length }})</h3>
+            <div v-if="commentsLoading" class="comments-loading">
+              <el-skeleton :rows="3" animated />
+            </div>
+            <div v-else-if="comments.length > 0" class="comments-list">
+              <div v-for="comment in comments" :key="comment.id" class="comment-item">
+                <div class="comment-header">
+                  <div class="comment-user">
+                    <el-avatar :size="32" :icon="User" class="avatar-icon" />
+                    <span class="nickname">{{ comment.nickname || comment.username }}</span>
+                  </div>
+                  <div class="comment-meta">
+                    <el-rate v-model="comment.rating" disabled show-score text-color="#ff9900" size="small" />
+                    <span class="time">{{ formatDate(comment.created_at) }}</span>
+                  </div>
+                </div>
+                <div class="comment-content">{{ comment.content }}</div>
+                <el-divider border-style="dashed" />
+              </div>
+            </div>
+            <div v-else class="no-comments">
+              <el-empty description="暂无评价，快来抢沙发吧！" :image-size="60" />
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 专属 AI 悬浮按钮 -->
+    <div class="ai-fab" @click="toggleAIChat" v-if="spot">
+      <el-tooltip content="专属景点AI导游" placement="left">
+        <div class="fab-button" :class="{ 'active': aiChatVisible }">
+          <el-icon><Headset /></el-icon>
+        </div>
+      </el-tooltip>
+    </div>
+
+    <!-- 专属 AI 聊天抽屉 -->
+    <el-drawer
+      v-model="aiChatVisible"
+      :title="`🤖 ${spot?.name} 专属导游`"
+      size="400px"
+      direction="rtl"
+      class="spot-ai-drawer"
+      :append-to-body="true"
+    >
+      <div class="ai-chat-container" v-loading="aiLoading">
+        <div class="chat-messages" ref="aiMessagesContainer">
+          <div v-for="(msg, index) in aiMessages" :key="index" :class="['message', msg.role]">
+            <el-avatar class="avatar" :size="32" :icon="msg.role === 'user' ? User : Service" />
+            <div class="message-content">
+              <div v-if="msg.role === 'user'" class="text">{{ msg.content }}</div>
+              <div v-else class="text ai-reply markdown-body" v-html="formatMessage(msg.content)"></div>
+            </div>
+          </div>
+          <div v-show="isReplying" class="message assistant typing">
+            <el-avatar class="avatar" :size="32" :icon="Service" />
+            <div class="message-content">
+              <div class="text">正在思考...<span class="dot">...</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-input-area">
+          <el-input
+            v-model="aiInput"
+            type="textarea"
+            :rows="2"
+            :placeholder="`问我关于 ${spot?.name} 的问题吧...`"
+            resize="none"
+            @keyup.enter.prevent="sendAIMessage"
+            :disabled="isReplying"
+          />
+          <div class="input-actions">
+            <el-button type="primary" size="small" @click="sendAIMessage" :loading="isReplying" :disabled="!aiInput.trim()">
+              发送 <el-icon class="el-icon--right"><Promotion /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { marked } from 'marked'
 import {
   Location, Calendar, MapLocation, Tickets,
   Document, Timer, Ticket, Warning,
-  Star, StarFilled
+  Star, StarFilled, ChatDotRound, User, Headset, Service, Promotion
 } from '@element-plus/icons-vue'
-import { getSpotDetail, getCollections, toggleCollection, recordBehavior } from '../../api/spots'
+import { getSpotDetail, getCollections, toggleCollection, recordBehavior, getSpotComments, chatWithSpotAI } from '../../api/spots'
 import { useUserStore } from '../../store/user'
 
 const route = useRoute()
@@ -196,8 +278,86 @@ const goBack = () => {
   router.back()
 }
 
+// Comments logic
+const comments = ref<any[]>([])
+const commentsLoading = ref(false)
+
+const fetchComments = async () => {
+  commentsLoading.value = true
+  try {
+    const res = await getSpotComments(spotId)
+    comments.value = res.items || []
+  } catch (error) {
+    console.error('Failed to fetch comments:', error)
+  } finally {
+    commentsLoading.value = false
+  }
+}
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// AI Chat logic
+const aiChatVisible = ref(false)
+const aiLoading = ref(false)
+const isReplying = ref(false)
+const aiInput = ref('')
+const aiMessages = ref<any[]>([
+  { role: 'assistant', content: '你好！我是这个景点的专属AI导游。有什么我可以帮你的吗？' }
+])
+const aiMessagesContainer = ref<any>(null)
+const aiSessionId = ref('')
+
+const toggleAIChat = () => {
+  aiChatVisible.value = !aiChatVisible.value
+}
+
+const formatMessage = (content: string) => {
+  return marked(content)
+}
+
+const scrollToBottom = async () => {
+  await nextTick()
+  if (aiMessagesContainer.value) {
+    aiMessagesContainer.value.scrollTop = aiMessagesContainer.value.scrollHeight
+  }
+}
+
+const sendAIMessage = async () => {
+  if (!aiInput.value.trim() || isReplying.value) return
+
+  const userMsg = aiInput.value.trim()
+  aiInput.value = ''
+
+  aiMessages.value.push({ role: 'user', content: userMsg })
+  scrollToBottom()
+
+  isReplying.value = true
+
+  try {
+    const res = await chatWithSpotAI(spotId, {
+      message: userMsg,
+      session_id: aiSessionId.value
+    })
+
+    aiSessionId.value = res.session_id
+    aiMessages.value.push({ role: 'assistant', content: res.reply })
+  } catch (error) {
+    console.error('Failed to send message:', error)
+    ElMessage.error('发送消息失败，请稍后重试')
+    aiMessages.value.push({ role: 'assistant', content: '抱歉，我遇到了一些问题，请稍后再试。' })
+  } finally {
+    isReplying.value = false
+    scrollToBottom()
+  }
+}
+
 onMounted(() => {
   fetchDetail()
+  fetchComments()
   startTime.value = Date.now()
 })
 
@@ -349,5 +509,192 @@ onUnmounted(() => {
   color: #606266;
   text-align: justify;
   white-space: pre-line;
+}
+
+.comments-section {
+  margin-top: 30px;
+}
+
+.comment-item {
+  margin-bottom: 20px;
+}
+
+.comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.comment-user {
+  display: flex;
+  align-items: center;
+}
+
+.avatar-icon {
+  margin-right: 10px;
+  background-color: #409EFF;
+}
+
+.nickname {
+  font-weight: bold;
+  color: #303133;
+}
+
+.comment-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.time {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 5px;
+}
+
+.comment-content {
+  color: #606266;
+  line-height: 1.6;
+  margin-bottom: 15px;
+}
+
+.no-comments {
+  padding: 40px 0;
+}
+
+/* AI Chat Fab */
+.ai-fab {
+  position: fixed;
+  right: 40px;
+  bottom: 100px;
+  z-index: 100;
+  cursor: pointer;
+}
+
+.fab-button {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #409EFF, #79bbff);
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 28px;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+  transition: all 0.3s ease;
+}
+
+.fab-button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.5);
+}
+
+.fab-button.active {
+  background: #909399;
+  box-shadow: 0 4px 12px rgba(144, 147, 153, 0.4);
+}
+
+/* AI Drawer */
+.spot-ai-drawer :deep(.el-drawer__body) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background-color: #f5f7fa;
+}
+
+.message {
+  display: flex;
+  margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  background-color: #409EFF;
+}
+
+.message.assistant .avatar {
+  background-color: #e6a23c;
+  margin-right: 12px;
+}
+
+.message.user .avatar {
+  margin-left: 12px;
+}
+
+.message-content {
+  max-width: 75%;
+}
+
+.text {
+  padding: 10px 15px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.message.user .text {
+  background-color: #409EFF;
+  color: white;
+  border-top-right-radius: 0;
+}
+
+.message.assistant .text {
+  background-color: white;
+  color: #303133;
+  border-top-left-radius: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.typing .text {
+  color: #909399;
+  font-style: italic;
+}
+
+.dot {
+  animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+  0% { opacity: .2; }
+  20% { opacity: 1; }
+  100% { opacity: .2; }
+}
+
+.chat-input-area {
+  padding: 15px;
+  background-color: white;
+  border-top: 1px solid #ebeef5;
+}
+
+.input-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* Markdown 样式 */
+.markdown-body :deep(p) {
+  margin: 0 0 10px 0;
+}
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
 }
 </style>

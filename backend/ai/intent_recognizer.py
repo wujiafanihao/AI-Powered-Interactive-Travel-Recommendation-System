@@ -17,6 +17,7 @@
 """
 
 import os
+import re
 import sys
 import json
 import sqlite3
@@ -105,12 +106,15 @@ class IntentRecognizer:
             包含"几点"、"门票"就是问答意图。
             这样大部分请求可以跳过AI调用，响应更快。
         """
-        # 搜索意图的关键词
+        # 搜索意图的关键词（包含地名+动词模式也算搜索）
         search_keywords = [
             "推荐", "有什么好玩", "想去", "带孩子", "带老人",
             "适合", "哪里好玩", "去哪", "旅游", "度假",
             "亲子", "风景", "景点推荐", "哪些景点",
             "赏花", "赏红叶", "看雪", "泡温泉",
+            "有什么", "哪里有", "哪里的", "什么好", "好去处",
+            "玩什么", "逛什么", "吃什么", "最多", "最好",
+            "游玩", "打卡", "网红", "必去", "值得去",
         ]
 
         # 问答意图的关键词
@@ -118,6 +122,7 @@ class IntentRecognizer:
             "几点", "开放时间", "门票", "怎么去", "地址",
             "介绍一下", "评分", "多少钱", "在哪",
             "开不开", "免费吗", "需要预约",
+            "营业时间", "票价", "预约", "排队",
         ]
 
         # 系统帮助的关键词
@@ -168,6 +173,22 @@ class SmartSearcher:
     def __init__(self):
         self.llm_client = get_llm_client()
 
+    def _normalize_city(self, city_raw: str) -> str:
+        """
+        城市名归一化
+
+        大白话说明：
+            用户可能说"厦门市思明区"、"北京市海淀区"，
+            但我们数据库里存的是"厦门""北京"。
+            这个方法把用户说的城市名清理成数据库能匹配的格式。
+        """
+        if not city_raw:
+            return city_raw
+        # 去掉"市""区""县""自治州"等行政后缀，保留核心城市名
+        city = re.sub(r'(市|区|县|自治州|自治县|地区|特别行政区).*', '', city_raw)
+        # 如果清理后为空（比如输入就是"区"），返回原始值
+        return city.strip() if city.strip() else city_raw
+
     async def extract_conditions(self, user_message: str) -> dict:
         """
         从自然语言中提取搜索条件
@@ -184,16 +205,26 @@ class SmartSearcher:
         """
         instruction = """请从用户的旅游需求描述中提取搜索条件，返回JSON格式：
 {
-    "city": "目标城市名（如果提到的话，否则为null）",
+    "city": "目标城市名，只写城市核心名称，不要带'市''区''县'后缀。比如用户说'厦门市思明区'就填'厦门'，说'北京市海淀区'就填'北京'。如果没提到城市就填null",
     "spot_type": "景点类型：自然风光/历史文化/宗教场所/主题乐园/博物馆/现代都市/园林公园/乡村田园（如果能判断的话，否则为null）",
-    "season": "推荐季节：春/夏/秋/冬（如果提到的话，否则为null）",  
+    "season": "推荐季节：春/夏/秋/冬（如果提到的话，否则为null）",
     "target_group": "适合人群：亲子/老年/情侣/学生/摄影/探险（如果能判断的话，否则为null）",
-    "keywords": ["关键词列表，提取用户提到的具体需求"]
+    "keywords": ["关键词列表，提取用户需求中有实际搜索价值的词，去掉'最多''好玩'这类虚词"]
 }
-注意：如果某个字段无法从用户输入中判断，就填null，不要胡编。"""
+注意：
+1. city 只填城市名，不要带行政区划后缀
+2. keywords 要提取有利于搜索匹配的实体词（如'咖啡''海滩''古镇'），过滤掉纯修饰词
+3. 如果某个字段无法判断就填null"""
 
         result = await self.llm_client.extract_json(user_message, instruction)
-        return result if result else {}
+        if not result:
+            return {}
+
+        # 对城市名做二次归一化（兜底，防止 LLM 不听话）
+        if result.get("city"):
+            result["city"] = self._normalize_city(result["city"])
+
+        return result
 
     def search_spots(self, conditions: dict, limit: int = 10) -> list[dict]:
         """
@@ -211,11 +242,13 @@ class SmartSearcher:
         where_parts = ["1=1"]  # 永真条件（方便后续 AND 拼接）
         params = []
 
-        # 城市过滤
+        # 城市过滤（用 LIKE 模糊匹配，兼容"厦门"匹配"厦门"的情况）
         city = conditions.get("city")
         if city:
-            where_parts.append("city = ?")
-            params.append(city)
+            # 先归一化城市名
+            city = self._normalize_city(city)
+            where_parts.append("city LIKE ?")
+            params.append(f"%{city}%")
 
         # 景点类型过滤
         spot_type = conditions.get("spot_type")
@@ -362,7 +395,7 @@ class ChatService:
             reply = await llm.chat(
                 f"用户想找：{user_message}\n我搜到了这些景点：{', '.join(spot_names)}\n"
                 f"请用友好的口吻简要介绍为什么推荐这些景点（2-3句话即可）",
-                system_prompt="你是旅行小助手，请简洁友好地回复。"
+                system_prompt="你是一个经验丰富的旅游向导，像老朋友一样自然地推荐景点，不要说'根据资料'或'为您查到'这类机械的话。"
             )
             return {
                 "reply": reply,
@@ -371,21 +404,28 @@ class ChatService:
                 "conditions": conditions,
             }
         else:
-            print("⚠️ 结构化搜索未找到结果，自动尝试退化为 RAG 问答...")
-            # 当结构化查不到时，交给 RAG 引擎用向量搜一下试试
-            return await self._handle_qa(user_message, None)
+            # 结构化搜索没结果，退化到 RAG 向量检索，并传递已提取的城市信息
+            city = conditions.get("city")
+            print(f"⚠️ 结构化搜索未找到结果，退化为 RAG 问答（城市过滤: {city}）...")
+            return await self._handle_qa_with_city(user_message, None, city_filter=city)
 
     async def _handle_qa(self, user_message: str, history: list[dict] = None) -> dict:
+        """处理问答意图（不带城市过滤）"""
+        return await self._handle_qa_with_city(user_message, history, city_filter=None)
+
+    async def _handle_qa_with_city(self, user_message: str, history: list[dict] = None,
+                                    city_filter: str = None) -> dict:
         """
-        处理问答意图
+        处理问答意图（支持城市过滤）
 
         大白话：用 RAG 检索相关文档 → 让AI参考文档回答
+                可选带城市过滤，让向量检索更精准
         """
-        print(f"\n🔧 进入 _handle_qa 处理问答意图")
+        print(f"\n🔧 进入 _handle_qa 处理问答意图 (城市过滤: {city_filter})")
         rag = self._get_rag()
         if rag:
             print(f"✅ RAG 引擎可用，准备检索...")
-            result = await rag.answer_question(user_message, history)
+            result = await rag.answer_question(user_message, history, city_filter=city_filter)
             print(f"📚 RAG 检索返回 {len(result.get('sources', []))} 个来源")
             return {
                 "reply": result["answer"],
@@ -398,7 +438,7 @@ class ChatService:
             llm = get_llm_client()
             reply = await llm.chat(
                 user_message,
-                system_prompt="你是旅行小助手，一个友好的旅游问答助手。请回答用户关于旅游的问题。"
+                system_prompt="你是一个经验丰富的旅游向导，像熟悉当地的老朋友一样自然地回答问题。"
             )
             return {"reply": reply, "intent": INTENT_QA, "sources": []}
 

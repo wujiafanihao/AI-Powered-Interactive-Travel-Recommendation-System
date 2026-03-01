@@ -224,7 +224,7 @@ const handleDeleteSession = async (sessionId: string) => {
 
     // 如果删除的是当前会话
     if (currentSessionId.value === sessionId) {
-      if (sessions.value.length > 0) {
+      if (sessions.value.length > 0 && sessions.value[0]) {
         // 切换到第一个会话
         handleSessionSelect(sessions.value[0].id)
       } else {

@@ -135,6 +135,24 @@ async def search_spots(
     return {"items": items, "total": len(items), "query": q}
 
 
+@router.get("/{spot_id}/comments", summary="获取景点评论")
+async def get_spot_comments(spot_id: int):
+    """获取景点的用户评论"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT c.id, c.rating, c.content, c.created_at, u.nickname, u.username
+        FROM spot_comments c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.spot_id = ?
+        ORDER BY c.created_at DESC
+    """, (spot_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    return {"items": [dict(row) for row in rows], "total": len(rows)}
 @router.get("/{spot_id}", summary="获取景点详情")
 async def get_spot_detail(spot_id: int):
     """获取单个景点的完整信息"""

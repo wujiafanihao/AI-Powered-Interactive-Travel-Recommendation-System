@@ -98,7 +98,7 @@ class RAGEngine:
 
         大白话说明：
             根据用户问题，在景点知识库里找最相关的文档。
-            可以按城市过滤。
+            可以按城市过滤。如果指定了城市但找不到结果，会自动取消过滤重试。
 
         参数：
             query: 搜索文本
@@ -113,19 +113,31 @@ class RAGEngine:
         # 把查询文本变成向量
         query_embedding = self._embed_query(query)
 
-        # 构建过滤条件
-        where = None
+        # 如果有城市过滤，先尝试带城市过滤搜索
         if city_filter:
             where = {"city": city_filter}
+            results = self.spot_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where,
+            )
+            # 如果城市过滤有结果，直接返回
+            if results and results["documents"] and results["documents"][0]:
+                print(f"  🏯 城市过滤 '{city_filter}' 命中 {len(results['documents'][0])} 条结果")
+                return self._parse_results(results)
+            else:
+                print(f"  ⚠️ 城市过滤 '{city_filter}' 无结果，取消过滤重试...")
 
-        # 在 ChromaDB 中检索
+        # 不带城市过滤的搜索（全库检索）
         results = self.spot_collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
-            where=where,
         )
 
-        # 组装返回结果
+        return self._parse_results(results)
+
+    def _parse_results(self, results) -> list[dict]:
+        """解析 ChromaDB 查询结果为统一格式"""
         docs = []
         if results and results["documents"]:
             for i in range(len(results["documents"][0])):
@@ -134,7 +146,6 @@ class RAGEngine:
                     "metadata": results["metadatas"][0][i],
                     "distance": results["distances"][0][i] if results.get("distances") else None,
                 })
-
         return docs
 
     def search_faq(self, query: str, n_results: int = 3) -> list[dict]:
@@ -163,7 +174,8 @@ class RAGEngine:
 
         return docs
 
-    async def answer_question(self, question: str, history: list[dict] = None) -> dict:
+    async def answer_question(self, question: str, history: list[dict] = None,
+                               city_filter: str = None) -> dict:
         """
         智能问答 - RAG核心方法
 
@@ -173,11 +185,10 @@ class RAGEngine:
             2. 把搜索到的内容作为"参考资料"
             3. 让AI参考这些资料回答问题
 
-            这样回答就是基于我们真实数据的，不是AI瞎编的。
-
         参数：
             question: 用户问题
             history: 对话历史
+            city_filter: 城市过滤（可选，用于提高检索精准度）
         返回：
             {
                 "answer": AI的回答,
@@ -186,7 +197,7 @@ class RAGEngine:
             }
         """
         # 第一步：同时搜索景点知识库和FAQ库
-        spot_docs = self.search_spots(question, n_results=5)
+        spot_docs = self.search_spots(question, n_results=5, city_filter=city_filter)
         faq_docs = self.search_faq(question, n_results=2)
 
         # 第二步：判断应该参考哪些文档
@@ -222,7 +233,7 @@ class RAGEngine:
             # 没有相关文档，直接对话
             answer = await self.llm_client.chat(
                 question,
-                system_prompt="你是一个友好的旅游助手，名叫'旅行小助手'。请用简洁、实用的方式回答用户关于旅游的问题。"
+                system_prompt="你是一个经验丰富的旅游向导，像熟悉当地的老朋友一样自然地回答问题。"
             )
 
         return {

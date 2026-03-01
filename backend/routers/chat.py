@@ -96,6 +96,84 @@ async def chat(
 
 
 @router.get("/history", summary="获取对话历史")
+async def spot_chat(
+    spot_id: int,
+    data: ChatMessage,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    针对特定景点的AI对话
+
+    大白话：在景点详情页和AI对话，AI会带上这个景点的信息
+    """
+    user_id = current_user["id"]
+    session_id = data.session_id or f"spot_{spot_id}_{uuid.uuid4()}"
+
+    # 获取历史对话
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # 获取景点信息作为上下文
+    cursor.execute("SELECT * FROM spots WHERE id = ?", (spot_id,))
+    spot = cursor.fetchone()
+
+    if not spot:
+        conn.close()
+        raise HTTPException(status_code=404, detail="景点不存在")
+
+    cursor.execute("""
+        SELECT role, content FROM chat_history
+        WHERE user_id = ? AND session_id = ?
+        ORDER BY created_at DESC LIMIT 10
+    """, (user_id, session_id))
+    history = [{"role": row["role"], "content": row["content"]} for row in cursor.fetchall()]
+    history.reverse()
+
+    # 保存用户消息
+    cursor.execute("""
+        INSERT INTO chat_history (user_id, role, content, session_id)
+        VALUES (?, 'user', ?, ?)
+    """, (user_id, data.message, session_id))
+    conn.commit()
+    conn.close()
+
+    # 构建特定景点的系统提示词
+    spot_context = f"""当前正在讨论的景点是：{spot['name']}（位于{spot['city']}）。
+景点介绍：{spot['description']}
+开放时间：{spot['open_time'] or '未知'}
+门票信息：{spot['ticket_info'] or '未知'}
+游玩贴士：{spot['tips'] or '无'}"""
+
+    # 调用聊天服务
+    chat_service = get_chat_service()
+
+    # 在这个特殊场景下，我们可以通过修改系统提示词或直接让大模型基于上下文回答
+    # 这里直接调用底层的 chat_with_context 比较合适
+    system_prompt = f"""你是一个专属的景点导游。{spot_context}
+请友好、热情地回答游客关于这个景点的任何问题。如果游客问了其他景点，你可以简单回答并尝试把话题引回当前景点。"""
+
+    from ai.llm_client import get_llm_client
+    llm_client = get_llm_client()
+    reply = await llm_client.chat(data.message, system_prompt=system_prompt, history=history)
+
+    # 保存AI回复
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO chat_history (user_id, role, content, session_id)
+        VALUES (?, 'assistant', ?, ?)
+    """, (user_id, reply, session_id))
+    conn.commit()
+    conn.close()
+
+    return ChatResponse(
+        reply=reply,
+        intent="spot_qa",
+        spots=[dict(spot)],  # 附带当前景点信息
+        session_id=session_id,
+    )
+@router.get("/history", summary="获取对话历史")
 async def get_chat_history(
     session_id: Optional[str] = None,
     limit: int = 50,
