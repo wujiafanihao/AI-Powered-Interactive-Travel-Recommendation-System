@@ -95,7 +95,7 @@ async def chat(
     )
 
 
-@router.get("/history", summary="获取对话历史")
+@router.post("/spot/{spot_id}", summary="针对特定景点的AI对话")
 async def spot_chat(
     spot_id: int,
     data: ChatMessage,
