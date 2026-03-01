@@ -4,7 +4,7 @@
     "title": "项目初始化与环境搭建",
     "requirements": "创建项目目录结构、.env、.gitignore、requirements.txt，初始化 Git 仓库，安装所有 Python 依赖到 conda xianyu 环境",
     "goal": "搭建完整的项目骨架，确保所有依赖可用",
-    "status": "pending"
+    "status": "complete"
   },
   {
     "id": 2,
