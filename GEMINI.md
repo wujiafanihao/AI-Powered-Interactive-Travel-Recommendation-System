@@ -27,6 +27,30 @@
 - 环境变量通过 `.env` 加载，严禁硬编码
 
 ## 7. 项目结构与上下文（自动维护）
-- **上次更新时间**: 2026-03-01 (初始化)
-- **核心功能**: 项目初始化中
-- **目录结构说明**: 待任务全清后更新
+- **上次更新时间**: 2026-03-01
+- **核心功能**: 完成智能旅游推荐系统前后端闭环。后端提供用户认证、景点查询、混合推荐引擎（协同过滤+内容推荐+热门推荐+场景推荐）、LangChain RAG 智能帮搜问答管线。前端通过 Vue 3 + Element Plus 实现用户交互，包括登录/注册、首页（场景+个性化推荐）、景点探索（过滤和分页）、景点详情（收藏和打分功能）以及 AI 智能对话页面（支持引用、意图标签和推荐卡片）。
+- **目录结构说明**:
+  - `backend/`: Python FastAPI 后端目录
+    - `main.py`: 后端入口与 FastAPI 实例
+    - `database.py`: SQLite 数据库连接
+    - `routers/`: 路由目录（`auth.py`用户认证, `spots.py`景点接口, `recommend.py`推荐接口, `chat.py` AI对话接口）
+    - `models/`: Pydantic 请求/响应模型定义
+    - `ai/`: LangChain 与意图识别逻辑（`intent_recognizer.py`, `rag_pipeline.py`）
+    - `algorithms/`: 推荐算法实现（`collaborative.py`, `content_based.py`, `hybrid_recommender.py`）
+    - `data/chroma_db/`: ChromaDB 向量数据库持久化目录
+    - `data/travel.db`: SQLite 关系型数据库
+  - `frontend/`: Vue 3 + Vite 前端目录
+    - `src/main.ts`: Vue 应用入口
+    - `src/router/index.ts`: Vue 路由配置
+    - `src/store/user.ts`: Pinia 用户状态管理
+    - `src/api/`: API 请求模块 (`index.ts`, `spots.ts`)
+    - `src/views/`: 页面视图
+      - `Home.vue`: 首页与场景/个性化推荐
+      - `Login.vue` / `Register.vue`: 用户认证
+      - `Spot/SpotList.vue`: 景点列表与搜索过滤
+      - `Spot/SpotDetail.vue`: 景点详情展示、打分、收藏
+      - `AI/Chat.vue`: AI 智能帮搜与对话页面
+  - `citydata/`: 原始景点 CSV 数据
+  - `.env`: 环境变量配置（包含 API Key 与数据库密码）
+  - `task.json`: 任务追踪配置
+  - `CLAUDE.md`: 本项目规范与上下文说明
