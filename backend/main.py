@@ -59,8 +59,14 @@ app.add_middleware(
 
 # ============================================
 # 注册 API 路由
-# 后续任务中会添加具体的路由模块
 # ============================================
+from routers import auth, spots, recommend, chat
+
+app.include_router(auth.router, prefix="/api")
+app.include_router(spots.router, prefix="/api")
+app.include_router(recommend.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
+
 
 @app.get("/", tags=["系统"])
 async def root():

@@ -37,22 +37,22 @@
   {
     "id": 8,
     "title": "LangChain + RAG 管线",
-    "status": "processing"
+    "status": "complete"
   },
   {
     "id": 9,
     "title": "智能帮搜与意图识别",
-    "status": "pending"
+    "status": "complete"
   },
   {
     "id": 10,
     "title": "FastAPI 核心 API 开发",
-    "status": "pending"
+    "status": "complete"
   },
   {
     "id": 11,
     "title": "Vue 前端项目初始化",
-    "status": "pending"
+    "status": "processing"
   },
   {
     "id": 12,
