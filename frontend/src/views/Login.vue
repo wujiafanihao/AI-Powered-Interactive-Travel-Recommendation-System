@@ -55,22 +55,16 @@ const handleLogin = async () => {
     if (valid) {
       loading.value = true
       try {
-        // 请求后台登录接口
-        const formData = new URLSearchParams()
-        formData.append('username', loginForm.username)
-        formData.append('password', loginForm.password)
-
-        const res = await api.post('/api/auth/login', formData, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
+        const res = await api.post('/auth/login', {
+          username: loginForm.username,
+          password: loginForm.password
         })
 
         // 保存 token
         userStore.setToken(res.data.access_token)
 
         // 请求后台获取用户信息接口
-        const userRes = await api.get('/api/users/me')
+        const userRes = await api.get('/auth/me')
         userStore.setUserInfo(userRes.data)
 
         ElMessage.success('登录成功')

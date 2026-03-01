@@ -73,7 +73,11 @@ const handleRegister = async () => {
     if (valid) {
       loading.value = true
       try {
-        await api.post('/api/users/register', registerForm)
+        const data = {
+          ...registerForm,
+          travel_style: registerForm.travel_style ? registerForm.travel_style.split(',').map((s: string) => s.trim()).filter((s: string) => s) : []
+        }
+        await api.post('/auth/register', data)
         ElMessage.success('注册成功，请登录')
         router.push('/login')
       } catch (error: any) {

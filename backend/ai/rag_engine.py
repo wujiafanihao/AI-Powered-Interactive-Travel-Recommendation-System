@@ -51,7 +51,10 @@ class RAGEngine:
             os.path.dirname(os.path.dirname(__file__)),
             settings.CHROMA_DB_PATH
         )
-        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+        self.chroma_client = chromadb.PersistentClient(
+            path=chroma_path,
+            settings=chromadb.config.Settings(anonymized_telemetry=False)
+        )
 
         # OpenAI 嵌入客户端（用来把问题变成向量）
         self.embed_client = OpenAI(

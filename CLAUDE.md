@@ -43,6 +43,7 @@
     - `src/main.ts`: Vue 应用入口
     - `src/router/index.ts`: Vue 路由配置
     - `src/store/user.ts`: Pinia 用户状态管理
+    - `src/api/`: API 请求模块 (`index.ts`, `spots.ts`)
     - `src/views/`: 页面视图
       - `Home.vue`: 首页与场景/个性化推荐
       - `Login.vue` / `Register.vue`: 用户认证
@@ -51,5 +52,5 @@
       - `AI/Chat.vue`: AI 智能帮搜与对话页面
   - `citydata/`: 原始景点 CSV 数据
   - `.env`: 环境变量配置（包含 API Key 与数据库密码）
-  - `task.json`: 任务追踪配置（当前已清空）
+  - `task.json`: 任务追踪配置
   - `CLAUDE.md`: 本项目规范与上下文说明

@@ -57,11 +57,24 @@ async def chat(
 
     # 调用聊天服务处理消息
     chat_service = get_chat_service()
+    
+    print(f"\n========== AI 对话调试信息 ==========")
+    print(f"👤 用户消息: {data.message}")
+    print(f"🆔 用户ID: {user_id}")
+    print(f"📋 会话ID: {session_id}")
+    
     result = await chat_service.process_message(
         user_message=data.message,
         user_id=user_id,
         history=history,
     )
+    
+    print(f"🎯 识别意图: {result.get('intent', 'unknown')}")
+    print(f"📝 AI 回复: {result.get('reply', '')[:100]}...")
+    print(f"🔍 搜索结果数量: {len(result.get('spots', []))}")
+    if result.get('sources'):
+        print(f"📚 参考来源: {result.get('sources')}")
+    print(f"========================================\n")
 
     # 保存AI回复到历史
     conn = sqlite3.connect(DB_PATH)

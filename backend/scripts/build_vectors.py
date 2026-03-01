@@ -327,7 +327,10 @@ def main():
     # 第二步：初始化 ChromaDB
     print(f"\n💾 初始化 ChromaDB: {CHROMA_PATH}")
     os.makedirs(CHROMA_PATH, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    chroma_client = chromadb.PersistentClient(
+        path=CHROMA_PATH,
+        settings=chromadb.config.Settings(anonymized_telemetry=False)
+    )
 
     # 第三步：从数据库读取景点数据
     print("\n📊 从 SQLite 读取景点数据...")

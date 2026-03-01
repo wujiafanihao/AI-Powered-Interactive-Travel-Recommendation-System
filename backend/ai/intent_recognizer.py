@@ -346,11 +346,14 @@ class ChatService:
 
         大白话：提取搜索条件 → 查数据库 → 让AI生成推荐语
         """
+        print(f"\n🔧 进入 _handle_search 处理搜索意图")
         # 提取搜索条件
         conditions = await self.smart_searcher.extract_conditions(user_message)
-
+        print(f"🔎 提取的搜索条件: {conditions}")
+        
         # 搜索景点
         spots = self.smart_searcher.search_spots(conditions, limit=10)
+        print(f"🔍 搜索到 {len(spots)} 个景点")
 
         # 让AI生成一段推荐语
         if spots:
@@ -361,15 +364,16 @@ class ChatService:
                 f"请用友好的口吻简要介绍为什么推荐这些景点（2-3句话即可）",
                 system_prompt="你是旅行小助手，请简洁友好地回复。"
             )
+            return {
+                "reply": reply,
+                "intent": INTENT_SEARCH,
+                "spots": spots,
+                "conditions": conditions,
+            }
         else:
-            reply = "抱歉，没有找到匹配的景点 😔 您可以试试更宽泛的描述，比如「北京有什么好玩的」。"
-
-        return {
-            "reply": reply,
-            "intent": INTENT_SEARCH,
-            "spots": spots,
-            "conditions": conditions,
-        }
+            print("⚠️ 结构化搜索未找到结果，自动尝试退化为 RAG 问答...")
+            # 当结构化查不到时，交给 RAG 引擎用向量搜一下试试
+            return await self._handle_qa(user_message, None)
 
     async def _handle_qa(self, user_message: str, history: list[dict] = None) -> dict:
         """
@@ -377,9 +381,12 @@ class ChatService:
 
         大白话：用 RAG 检索相关文档 → 让AI参考文档回答
         """
+        print(f"\n🔧 进入 _handle_qa 处理问答意图")
         rag = self._get_rag()
         if rag:
+            print(f"✅ RAG 引擎可用，准备检索...")
             result = await rag.answer_question(user_message, history)
+            print(f"📚 RAG 检索返回 {len(result.get('sources', []))} 个来源")
             return {
                 "reply": result["answer"],
                 "intent": INTENT_QA,
@@ -387,6 +394,7 @@ class ChatService:
             }
         else:
             # RAG不可用，直接用LLM回答
+            print(f"⚠️ RAG 引擎不可用，使用纯 LLM 回答")
             llm = get_llm_client()
             reply = await llm.chat(
                 user_message,
