@@ -76,8 +76,9 @@ class IntentRecognizer:
         if rule_result["confidence"] > 0.8:
             return rule_result
 
-        # 规则判断不确定时，用 LLM 判断
-        instruction = """请判断以下用户输入属于哪种意图：
+        # 规则判断不确定时，用 LLM 判断（但要有降级处理）
+        try:
+            instruction = """请判断以下用户输入属于哪种意图：
 1. search - 用户想搜索/推荐景点（如"推荐几个xxx"、"有什么好玩的"、"想去xxx"）
 2. qa - 用户在问某个景点的具体信息（如"几点开门"、"门票多少钱"、"怎么去"）
 3. help - 用户在问系统怎么使用（如"怎么收藏"、"怎么注册"）
@@ -85,16 +86,18 @@ class IntentRecognizer:
 
 请返回JSON格式：{"intent": "search/qa/help/chat", "confidence": 0.0-1.0}"""
 
-        result = await self.llm_client.extract_json(user_message, instruction)
+            result = await self.llm_client.extract_json(user_message, instruction)
 
-        if result and "intent" in result:
-            return {
-                "intent": result["intent"],
-                "confidence": result.get("confidence", 0.7),
-            }
-
-        # 兜底：默认当作问答处理
-        return {"intent": INTENT_QA, "confidence": 0.5}
+            if result and "intent" in result:
+                return {
+                    "intent": result["intent"],
+                    "confidence": result.get("confidence", 0.7),
+                }
+        except Exception as e:
+            print(f"⚠️ LLM意图识别失败，使用规则结果: {e}")
+        
+        # 兜底：使用规则判断的结果
+        return rule_result
 
     def _rule_based_intent(self, text: str) -> dict:
         """
@@ -380,23 +383,32 @@ class ChatService:
         大白话：提取搜索条件 → 查数据库 → 让AI生成推荐语
         """
         print(f"\n🔧 进入 _handle_search 处理搜索意图")
-        # 提取搜索条件
-        conditions = await self.smart_searcher.extract_conditions(user_message)
-        print(f"🔎 提取的搜索条件: {conditions}")
+        # 提取搜索条件（即使失败也继续，用空条件搜索）
+        try:
+            conditions = await self.smart_searcher.extract_conditions(user_message)
+            print(f"🔎 提取的搜索条件: {conditions}")
+        except Exception as e:
+            print(f"⚠️ 搜索条件提取失败，使用空条件搜索: {e}")
+            conditions = {}
         
         # 搜索景点
         spots = self.smart_searcher.search_spots(conditions, limit=10)
         print(f"🔍 搜索到 {len(spots)} 个景点")
 
-        # 让AI生成一段推荐语
+        # 让AI生成一段推荐语（如果失败则用简单回复）
         if spots:
-            spot_names = [f"{s['name']}({s['city']})" for s in spots[:5]]
-            llm = get_llm_client()
-            reply = await llm.chat(
-                f"用户想找：{user_message}\n我搜到了这些景点：{', '.join(spot_names)}\n"
-                f"请用友好的口吻简要介绍为什么推荐这些景点（2-3句话即可）",
-                system_prompt="你是一个经验丰富的旅游向导，像老朋友一样自然地推荐景点，不要说'根据资料'或'为您查到'这类机械的话。"
-            )
+            try:
+                spot_names = [f"{s['name']}({s['city']})" for s in spots[:5]]
+                llm = get_llm_client()
+                reply = await llm.chat(
+                    f"用户想找：{user_message}\n我搜到了这些景点：{', '.join(spot_names)}\n"
+                    f"请用友好的口吻简要介绍为什么推荐这些景点（2-3句话即可）",
+                    system_prompt="你是一个经验丰富的旅游向导，像老朋友一样自然地推荐景点，不要说'根据资料'或'为您查到'这类机械的话。"
+                )
+            except Exception as e:
+                print(f"⚠️ AI推荐语生成失败，使用简单回复: {e}")
+                reply = f"太好了！我为你找到了 {len(spots)} 个不错的景点～ 你可以看看下面的卡片，有感兴趣的就点进去了解详情吧！🗺️"
+            
             return {
                 "reply": reply,
                 "intent": INTENT_SEARCH,
