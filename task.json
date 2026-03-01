@@ -11,7 +11,7 @@
     "title": "SQLite 建模与景点数据导入",
     "requirements": "设计7张核心数据表的建表SQL，编写 database.py 初始化数据库，编写 import_citydata.py 将352个城市CSV的33000+景点数据导入 SQLite spots 表，同时提取景点类型标签和适宜人群标签",
     "goal": "完成数据库初始化和景点数据ETL管线",
-    "status": "pending"
+    "status": "complete"
   },
   {
     "id": 3,
