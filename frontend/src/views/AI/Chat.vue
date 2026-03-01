@@ -1,18 +1,23 @@
 <template>
+  <!-- AI 聊天页面容器 -->
   <div class="chat-container">
     <el-container class="chat-layout">
       <!-- 左侧：历史会话列表 -->
       <el-aside width="250px" class="chat-sidebar">
         <div class="sidebar-header">
+          <!-- 新对话按钮 -->
           <el-button type="primary" class="new-chat-btn" @click="startNewChat">
             <el-icon><Plus /></el-icon> 新对话
           </el-button>
         </div>
+        <!-- 会话列表菜单 -->
         <el-menu :default-active="currentSessionId" class="session-menu" @select="handleSessionSelect">
           <el-menu-item v-for="session in sessions" :key="session.id" :index="session.id">
             <el-icon><ChatDotRound /></el-icon>
             <template #title>
+              <!-- 会话标题，显示在菜单中 -->
               <span class="session-title" :title="session.title">{{ session.title }}</span>
+              <!-- 删除会话图标，鼠标悬停时显示 -->
               <el-icon class="delete-icon" @click.stop="handleDeleteSession(session.id)"><Delete /></el-icon>
             </template>
           </el-menu-item>
@@ -21,7 +26,9 @@
 
       <!-- 右侧：聊天内容区 -->
       <el-main class="chat-main" v-loading="loading">
+        <!-- 聊天消息区域 -->
         <div class="chat-messages" ref="messagesContainer">
+          <!-- 遍历所有消息，根据角色显示不同样式 -->
           <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
             <el-avatar class="avatar" :size="40" :icon="msg.role === 'user' ? User : Service" />
             <div class="message-content">
@@ -30,16 +37,18 @@
 
               <!-- AI 回复 -->
               <div v-else class="ai-reply">
+                <!-- AI 回复的文本内容，使用 Markdown 渲染 -->
                 <div class="text markdown-body" v-html="formatMessage(msg.content)"></div>
 
-                <!-- 意图标签 -->
+                <!-- 意图标签（如果有） -->
                 <div v-if="msg.intent" class="intent-tag">
                   <el-tag size="small" type="info">{{ msg.intent }}</el-tag>
                 </div>
 
-                <!-- 推荐景点卡片 -->
+                <!-- 推荐景点卡片（如果有） -->
                 <div v-if="msg.spots && msg.spots.length > 0" class="spot-cards">
                   <el-row :gutter="10">
+                    <!-- 只显示前 3 个景点 -->
                     <el-col :span="8" v-for="spot in msg.spots.slice(0, 3)" :key="spot.id">
                       <el-card class="spot-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(spot.id)">
                         <img :src="spot.image_url || 'https://via.placeholder.com/150x100?text=暂无图片'" class="spot-img" />
@@ -50,12 +59,13 @@
                       </el-card>
                     </el-col>
                   </el-row>
+                  <!-- 如果有超过 3 个景点，显示查看全部按钮 -->
                   <div class="more-spots" v-if="msg.spots.length > 3">
                     <el-button link type="primary" @click="showMoreSpots(msg.spots)">查看全部 {{ msg.spots.length }} 个推荐景点 >></el-button>
                   </div>
                 </div>
 
-                <!-- 来源引用 -->
+                <!-- 来源引用（如果有） -->
                 <div v-if="msg.sources && msg.sources.length > 0" class="sources">
                   <div class="source-title">参考来源：</div>
                   <ul>
@@ -67,6 +77,7 @@
               </div>
             </div>
           </div>
+          <!-- AI 正在输入的动画 -->
           <div v-show="isReplying" class="message assistant typing">
             <el-avatar class="avatar" :size="40" :icon="Service" />
             <div class="message-content">
@@ -115,15 +126,22 @@
 </template>
 
 <script setup lang="ts">
+// 引入 Vue 的核心函数
 import { ref, onMounted, nextTick } from 'vue'
+// 引入路由，用于页面跳转
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+// 引入 Element Plus 的消息提示和确认框
+import { ElMessage, ElMessageBox } from 'element-plus'
+// 引入 Element Plus 的图标
 import { Plus, ChatDotRound, User, Service, Promotion, Delete } from '@element-plus/icons-vue'
+// 引入 API 接口
 import { getChatHistory, chatWithAI, deleteChatSession } from '../../api/spots'
+// 引入用户状态管理
 import { useUserStore } from '../../store/user'
+// 引入 Markdown 解析库
 import { marked } from 'marked'
-import { ElMessageBox } from 'element-plus'
 
+// 获取路由实例
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -136,12 +154,12 @@ const messages = ref<any[]>([])
 const currentSessionId = ref('')
 const sessions = ref<{id: string, title: string}[]>([])
 
+// 更多景点抽屉相关状态
 const drawerVisible = ref(false)
 const currentSpots = ref<any[]>([])
 
-// 获取历史会话列表（简化版：从本地或最近一条记录提取）
+// 获取历史会话列表（简化版：从聊天历史中提取）
 const fetchSessions = async () => {
-  // 实际应该有个专门的 /chat/sessions 接口，这里用 /chat/history 模拟
   try {
     const res = await getChatHistory()
 
@@ -185,9 +203,9 @@ const loadHistory = async (sessionId: string) => {
   }
 }
 
-// 新对话
+// 开始新对话
 const startNewChat = () => {
-  // 生成简单的UUID作为新会话ID
+  // 生成简单的 UUID 作为新会话 ID
   currentSessionId.value = 'session_' + Date.now() + '_' + Math.floor(Math.random() * 1000)
   messages.value = [{
     role: 'assistant',
@@ -210,12 +228,14 @@ const handleSessionSelect = (index: string) => {
 // 删除会话
 const handleDeleteSession = async (sessionId: string) => {
   try {
+    // 显示确认对话框
     await ElMessageBox.confirm('确定要删除这个会话吗？删除后无法恢复。', '删除确认', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
     })
 
+    // 调用删除 API
     await deleteChatSession(sessionId)
     ElMessage.success('会话已删除')
 
@@ -240,60 +260,61 @@ const handleDeleteSession = async (sessionId: string) => {
   }
 }
 
-  // 发送消息
-  const sendMessage = async (e?: KeyboardEvent) => {
-    // 处理 Shift+Enter 换行
-    if (e && e.shiftKey) return
+// 发送消息
+const sendMessage = async (e?: KeyboardEvent) => {
+  // 处理 Shift+Enter 换行
+  if (e && e.shiftKey) return
 
-    const text = inputMessage.value.trim()
-    if (!text || isReplying.value) return
+  const text = inputMessage.value.trim()
+  if (!text || isReplying.value) return
 
-    // 更新当前对话标题
-    const currentSession = sessions.value.find(s => s.id === currentSessionId.value)
-    if (currentSession && currentSession.title === '新对话') {
-      currentSession.title = text.substring(0, 15) + '...'
-    }
+  // 更新当前对话标题（如果是新对话）
+  const currentSession = sessions.value.find(s => s.id === currentSessionId.value)
+  if (currentSession && currentSession.title === '新对话') {
+    currentSession.title = text.substring(0, 15) + '...'
+  }
 
-    // 添加用户消息
-    messages.value.push({ role: 'user', content: text })
-    inputMessage.value = ''
-    isReplying.value = true
+  // 添加用户消息到列表
+  messages.value.push({ role: 'user', content: text })
+  inputMessage.value = ''
+  isReplying.value = true
+  scrollToBottom()
+
+  try {
+    // 调用 AI 聊天 API
+    const res = await chatWithAI({
+      message: text,
+      session_id: currentSessionId.value
+    })
+
+    // 添加 AI 回复到列表
+    messages.value.push({
+      role: 'assistant',
+      content: res.reply,
+      intent: res.intent,
+      spots: res.spots,
+      sources: res.sources
+    })
+  } catch (error) {
+    console.error('发送消息失败:', error)
+    messages.value.push({
+      role: 'assistant',
+      content: '抱歉，网络开小差了，请稍后再试。'
+    })
+  } finally {
+    isReplying.value = false
     scrollToBottom()
-
-    try {
-      const res = await chatWithAI({
-        message: text,
-        session_id: currentSessionId.value
-      })
-
-      // 添加 AI 回复
-      messages.value.push({
-        role: 'assistant',
-        content: res.reply,
-        intent: res.intent,
-        spots: res.spots,
-        sources: res.sources
-      })
-    } catch (error) {
-      console.error('发送消息失败:', error)
-      messages.value.push({
-        role: 'assistant',
-        content: '抱歉，网络开小差了，请稍后再试。'
-      })
-    } finally {
-      isReplying.value = false
-      scrollToBottom()
-    }
   }
+}
 
-  // 格式化 Markdown
-  const formatMessage = (content: string) => {
-    if (!content) return ''
-    const result = marked.parse(content)
-    return (result instanceof Promise ? '' : result) as string
-  }
+// 使用 marked 格式化 Markdown 消息
+const formatMessage = (content: string) => {
+  if (!content) return ''
+  const result = marked.parse(content)
+  return (result instanceof Promise ? '' : result) as string
+}
 
-// 滚动到底部
+// 滚动到聊天底部
 const scrollToBottom = () => {
   nextTick(() => {
     if (messagesContainer.value) {
@@ -302,26 +323,32 @@ const scrollToBottom = () => {
   })
 }
 
+// 跳转到景点详情页
 const goToSpot = (id: number) => {
   router.push(`/spot/${id}`)
 }
 
+// 显示更多景点
 const showMoreSpots = (spots: any[]) => {
   currentSpots.value = spots
   drawerVisible.value = true
 }
 
+// 组件挂载时执行
 onMounted(() => {
+  // 如果未登录，跳转到登录页
   if (!userStore.token) {
     ElMessage.warning('请先登录后使用AI帮搜')
     router.push('/login?redirect=/ai')
     return
   }
+  // 获取历史会话
   fetchSessions()
 })
 </script>
 
 <style scoped>
+/* AI 聊天页面容器样式 */
 .chat-container {
   height: calc(100vh - 60px); /* 减去顶部导航高度 */
   background-color: #f5f7fa;
@@ -329,6 +356,7 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
+/* 聊天布局样式 */
 .chat-layout {
   height: 100%;
   background: #fff;
@@ -337,6 +365,7 @@ onMounted(() => {
   overflow: hidden;
 }
 
+/* 聊天侧边栏样式 */
 .chat-sidebar {
   border-right: 1px solid #e4e7ed;
   background-color: #fafafa;
@@ -344,6 +373,7 @@ onMounted(() => {
   flex-direction: column;
 }
 
+/* 侧边栏头部样式 */
 .sidebar-header {
   padding: 20px;
   border-bottom: 1px solid #e4e7ed;
@@ -353,6 +383,7 @@ onMounted(() => {
   width: 100%;
 }
 
+/* 会话菜单样式 */
 .session-menu {
   flex: 1;
   overflow-y: auto;
@@ -360,6 +391,7 @@ onMounted(() => {
   background-color: transparent;
 }
 
+/* 会话标题样式 */
 .session-title {
   margin-left: 10px;
   white-space: nowrap;
@@ -369,17 +401,20 @@ onMounted(() => {
   width: 120px;
 }
 
+/* 删除图标样式 */
 .delete-icon {
   margin-left: auto;
   opacity: 0;
   transition: opacity 0.2s;
 }
 
+/* 菜单项悬停时显示删除图标 */
 .el-menu-item:hover .delete-icon {
   opacity: 1;
   color: #f56c6c;
 }
 
+/* 聊天主区域样式 */
 .chat-main {
   display: flex;
   flex-direction: column;
@@ -387,6 +422,7 @@ onMounted(() => {
   height: 100%;
 }
 
+/* 聊天消息区域样式 */
 .chat-messages {
   flex: 1;
   padding: 20px;
@@ -394,30 +430,36 @@ onMounted(() => {
   scroll-behavior: smooth;
 }
 
+/* 消息样式 */
 .message {
   display: flex;
   margin-bottom: 20px;
   animation: fadeIn 0.3s ease;
 }
 
+/* 用户消息样式（反向排列） */
 .message.user {
   flex-direction: row-reverse;
 }
 
+/* 头像样式 */
 .avatar {
   flex-shrink: 0;
   margin: 0 15px;
   background-color: #409EFF;
 }
 
+/* 用户头像颜色 */
 .message.user .avatar {
   background-color: #67C23A;
 }
 
+/* 消息内容区域样式 */
 .message-content {
   max-width: 70%;
 }
 
+/* 用户消息文本样式 */
 .message.user .text {
   background-color: #ecf5ff;
   color: #303133;
@@ -427,6 +469,7 @@ onMounted(() => {
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
+/* AI 回复样式 */
 .message.assistant .ai-reply {
   background-color: #fff;
   border: 1px solid #ebeef5;
@@ -435,6 +478,7 @@ onMounted(() => {
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
 }
 
+/* Markdown 文本样式 */
 .markdown-body {
   font-size: 14px;
   line-height: 1.6;
@@ -450,11 +494,13 @@ onMounted(() => {
   margin-bottom: 0;
 }
 
+/* 意图标签样式 */
 .intent-tag {
   margin-top: 10px;
   margin-bottom: 10px;
 }
 
+/* 景点卡片样式 */
 .spot-cards {
   margin-top: 15px;
   border-top: 1px dashed #e4e7ed;
@@ -497,6 +543,7 @@ onMounted(() => {
   margin-top: 10px;
 }
 
+/* 来源引用样式 */
 .sources {
   margin-top: 15px;
   font-size: 12px;
@@ -525,6 +572,7 @@ onMounted(() => {
   text-decoration: underline;
 }
 
+/* 正在输入样式 */
 .typing .text {
   background-color: #f4f4f5;
   padding: 12px 16px;
@@ -532,11 +580,13 @@ onMounted(() => {
   color: #909399;
 }
 
+/* 淡入动画 */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* 输入框区域样式 */
 .chat-input-area {
   padding: 20px;
   background-color: #fff;
@@ -555,6 +605,7 @@ onMounted(() => {
   color: #909399;
 }
 
+/* 更多景点抽屉样式 */
 .drawer-spot-list {
   padding: 10px;
 }

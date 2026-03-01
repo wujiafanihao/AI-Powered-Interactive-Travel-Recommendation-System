@@ -62,6 +62,9 @@ USER_PRAISE = [
 ]
 
 def generate_comment(rating):
+    if rating is None:
+        rating = 4.0
+    
     if rating >= 4.5:
         templates = POSITIVE_COMMENTS + USER_PRAISE
     elif rating >= 3.5:
@@ -92,6 +95,9 @@ def generate_comment(rating):
 
 def generate_rating_based_on_spot(spot_rating):
     """根据景点评分生成用户评论评分"""
+    if spot_rating is None:
+        spot_rating = 4.0
+    
     if spot_rating >= 4.5:
         return round(random.uniform(3.5, 5.0), 1)
     elif spot_rating >= 4.0:
@@ -172,7 +178,11 @@ def main():
     print(f"{'景点名称':<30} {'景点评分':>8} {'评论数':>6} {'平均评论评分':>12}")
     print("-" * 60)
     for row in cursor.fetchall():
-        print(f"{row[0][:28]:<30} {row[1]:>8.1f} {row[2]:>6} {row[3]:>12.1f}")
+        name = row[0] or "未知景点"
+        spot_rating = row[1] or 0.0
+        comment_count = row[2] or 0
+        avg_rating = row[3] or 0.0
+        print(f"{name[:28]:<30} {spot_rating:>8.1f} {comment_count:>6} {avg_rating:>12.1f}")
     
     conn.close()
 
