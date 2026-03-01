@@ -1,4 +1,4 @@
-# GEMINI.md - TravelAI 项目上下文文档
+# CLAUDE.md - TravelAI 项目上下文文档
 
 ## 0. 技术栈
 - **后端**: Python 3.14.3 + FastAPI

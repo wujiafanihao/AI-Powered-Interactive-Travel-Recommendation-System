@@ -17,6 +17,21 @@ const router = createRouter({
       path: '/register',
       name: 'register',
       component: () => import('../views/Register.vue')
+    },
+    {
+      path: '/spots',
+      name: 'spot-list',
+      component: () => import('../views/Spot/SpotList.vue')
+    },
+    {
+      path: '/spot/:id',
+      name: 'spot-detail',
+      component: () => import('../views/Spot/SpotDetail.vue')
+    },
+    {
+      path: '/ai',
+      name: 'ai-chat',
+      component: () => import('../views/AI/Chat.vue')
     }
   ]
 })
