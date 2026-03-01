@@ -17,7 +17,7 @@
   {
     "id": 4,
     "title": "ChromaDB 向量嵌入构建",
-    "status": "processing"
+    "status": "complete"
   },
   {
     "id": 5,
@@ -52,12 +52,12 @@
   {
     "id": 11,
     "title": "Vue 前端项目初始化",
-    "status": "processing"
+    "status": "complete"
   },
   {
     "id": 12,
     "title": "核心页面开发",
-    "status": "pending"
+    "status": "processing"
   },
   {
     "id": 13,
