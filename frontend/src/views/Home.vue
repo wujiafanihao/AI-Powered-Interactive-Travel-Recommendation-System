@@ -148,12 +148,11 @@ const components = {
   Search, ChatDotRound, Location, StarFilled,
   Present, Sunset, MostlyCloudy, Camera, MapLocation, Bicycle
 }
-import axios from 'axios'
+import request from '../api/request'
 import { useUserStore } from '../store/user'
 
 const router = useRouter()
 const userStore = useUserStore()
-const API_BASE = 'http://localhost:8000/api'
 
 // 场景定义
 const scenes = [
@@ -176,7 +175,7 @@ const recommendLoading = ref(false)
 const loadSceneSpots = async (sceneName: string) => {
   sceneLoading.value = true
   try {
-    const res = await axios.get(`${API_BASE}/recommend/scene/${encodeURIComponent(sceneName)}`, {
+    const res = await request.get(`/api/recommend/scene/${encodeURIComponent(sceneName)}`, {
       params: { n: 8 }
     })
     sceneSpots.value = res.data.items
@@ -193,8 +192,7 @@ const loadRecommendations = async () => {
 
   recommendLoading.value = true
   try {
-    const res = await axios.get(`${API_BASE}/recommend`, {
-      headers: { Authorization: `Bearer ${userStore.token}` },
+    const res = await request.get(`/api/recommend`, {
       params: { n: 8 }
     })
     recommendations.value = res.data
