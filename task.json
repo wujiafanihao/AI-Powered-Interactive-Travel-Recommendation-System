@@ -18,7 +18,7 @@
     "title": "模拟用户数据生成",
     "requirements": "编写 generate_mock_users.py 生成150个模拟用户、约15000条行为记录、约2000条收藏记录，数据存储到 citydata/ 目录下的 JSON 文件，并导入 SQLite。用户画像需覆盖不同年龄段、性别、旅行风格偏好，行为数据需与用户偏好高度相关",
     "goal": "生成符合真实分布的模拟数据，支撑推荐算法测试",
-    "status": "pending"
+    "status": "complete"
   },
   {
     "id": 4,
