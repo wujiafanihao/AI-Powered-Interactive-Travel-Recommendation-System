@@ -29,7 +29,7 @@ def calculate_composite_rating(spot_id: int, conn) -> float:
     # 获取原始基础评分
     cursor.execute("SELECT rating FROM spots WHERE id = ?", (spot_id,))
     base_rating_row = cursor.fetchone()
-    base_rating = base_rating_row[0] if base_rating_row and base_rating_row[0] else 3.0
+    base_rating = base_rating_row[0] if base_rating_row and base_rating_row[0] is not None else None
     
     # 获取评论平均评分
     cursor.execute("""
@@ -38,7 +38,7 @@ def calculate_composite_rating(spot_id: int, conn) -> float:
         WHERE spot_id = ?
     """, (spot_id,))
     comment_result = cursor.fetchone()
-    comment_avg = comment_result[0] if comment_result[0] else None
+    comment_avg = comment_result[0] if comment_result[0] is not None else None
     comment_count = comment_result[1] if comment_result[1] else 0
     
     # 获取用户行为评分（浏览时长、收藏等）
@@ -48,25 +48,29 @@ def calculate_composite_rating(spot_id: int, conn) -> float:
         WHERE spot_id = ? AND rating IS NOT NULL
     """, (spot_id,))
     behavior_result = cursor.fetchone()
-    behavior_avg = behavior_result[0] if behavior_result[0] else None
+    behavior_avg = behavior_result[0] if behavior_result[0] is not None else None
     behavior_count = behavior_result[1] if behavior_result[1] else 0
     
-    # 计算权重
-    total_weight = 1.0
-    final_rating = base_rating * 0.3  # 基础评分权重 30%
+    # 优先使用评论评分，其次用户行为评分，最后基础评分
+    if comment_avg and comment_count >= 3:
+        # 有足够多评论时，主要使用评论评分
+        final_rating = comment_avg
+    elif comment_avg and comment_count > 0:
+        # 评论较少时，结合评论和基础评分
+        if base_rating:
+            final_rating = comment_avg * 0.7 + base_rating * 0.3
+        else:
+            final_rating = comment_avg
+    elif behavior_avg and behavior_count > 0:
+        # 使用用户行为评分
+        final_rating = behavior_avg
+    elif base_rating:
+        # 使用基础评分
+        final_rating = base_rating
+    else:
+        # 默认评分
+        final_rating = 4.0
     
-    if comment_avg and comment_count > 0:
-        comment_weight = min(0.5, 0.2 + comment_count * 0.03)  # 评论越多权重越高，最高 50%
-        final_rating += comment_avg * comment_weight
-        total_weight += comment_weight
-    
-    if behavior_avg and behavior_count > 0:
-        behavior_weight = min(0.3, 0.1 + behavior_count * 0.02)  # 行为数据权重，最高 30%
-        final_rating += behavior_avg * behavior_weight
-        total_weight += behavior_weight
-    
-    # 归一化评分到 0-5 范围
-    final_rating = final_rating / total_weight
     final_rating = max(1.0, min(5.0, final_rating))  # 确保在 1-5 之间
     
     return round(final_rating, 1)
@@ -90,7 +94,7 @@ async def get_spots(
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 构建过滤条件
+    # 构建过滤条件（先不包含最低评分，因为我们需要先计算综合评分）
     where_parts = ["1=1"]
     params = []
 
@@ -100,36 +104,29 @@ async def get_spots(
     if spot_type:
         where_parts.append("spot_type LIKE ?")
         params.append(f"%{spot_type}%")
-    if min_rating:
-        where_parts.append("rating >= ?")
-        params.append(min_rating)
 
     where_clause = " AND ".join(where_parts)
 
-    # 排序
-    order = "rating DESC" if sort_by == "rating" else "name ASC"
-
-    # 总数
-    cursor.execute(f"SELECT COUNT(*) FROM spots WHERE {where_clause}", params)
-    total = cursor.fetchone()[0]
-
-    # 分页查询
-    offset = (page - 1) * page_size
+    # 查询所有符合条件的景点（先不限制数量）
     cursor.execute(f"""
         SELECT id, name, city, rating, image_url, spot_type, suggest_time, address
         FROM spots 
         WHERE {where_clause}
-        ORDER BY CASE WHEN rating IS NULL THEN 1 ELSE 0 END, {order}
-        LIMIT ? OFFSET ?
-    """, params + [page_size, offset])
+    """, params)
 
     rows = cursor.fetchall()
 
-    items = []
+    # 计算每个景点的综合评分并进行筛选
+    all_items = []
     for row in rows:
         spot_id = row["id"]
         composite_rating = calculate_composite_rating(spot_id, conn)
-        items.append({
+        
+        # 最低评分筛选
+        if min_rating and composite_rating < min_rating:
+            continue
+            
+        all_items.append({
             "id": spot_id,
             "name": row["name"],
             "city": row["city"],
@@ -141,6 +138,17 @@ async def get_spots(
         })
     
     conn.close()
+
+    # 排序
+    if sort_by == "rating":
+        all_items.sort(key=lambda x: (-x["rating"], x["name"]))
+    else:
+        all_items.sort(key=lambda x: x["name"])
+
+    # 分页
+    total = len(all_items)
+    offset = (page - 1) * page_size
+    items = all_items[offset:offset + page_size]
 
     return {
         "items": items,
