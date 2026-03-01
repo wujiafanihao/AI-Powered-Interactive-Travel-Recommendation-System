@@ -2,61 +2,143 @@
   <!-- 景点列表页面容器 -->
   <div class="spot-list-container">
     <!-- 筛选条件卡片 -->
-    <el-card class="filter-card">
+    <el-card class="filter-card" shadow="hover">
       <!-- 筛选表单，:inline 表示内联布局 -->
       <el-form :inline="true" :model="filters" class="filter-form">
         <!-- 搜索景点输入框 -->
         <el-form-item label="搜索景点">
-          <el-input v-model="filters.q" placeholder="请输入景点名称或关键词" clearable @keyup.enter="handleSearch" />
+          <el-input 
+            v-model="filters.q" 
+            placeholder="请输入景点名称或关键词" 
+            clearable 
+            @keyup.enter="handleSearch"
+            class="search-input"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
         </el-form-item>
         <!-- 城市选择下拉框 -->
         <el-form-item label="城市">
-          <el-select v-model="filters.city" placeholder="选择城市" clearable @change="fetchSpots">
+          <el-select 
+            v-model="filters.city" 
+            placeholder="选择城市" 
+            clearable 
+            @change="fetchSpots"
+            class="city-select"
+          >
             <el-option v-for="city in cities" :key="city" :label="city" :value="city" />
           </el-select>
         </el-form-item>
         <!-- 最低评分选择 -->
         <el-form-item label="最低评分">
-          <el-rate v-model="filters.min_rating" allow-half @change="fetchSpots" />
+          <div class="rating-selector">
+            <el-rate 
+              v-model="filters.min_rating" 
+              allow-half 
+              @change="handleRatingChange"
+              show-score
+              text-color="#ff9900"
+              class="rating-star"
+            />
+            <span class="rating-text" v-if="filters.min_rating > 0">
+              {{ filters.min_rating }} 分及以上
+            </span>
+            <span class="rating-text" v-else>
+              不限
+            </span>
+          </div>
         </el-form-item>
         <!-- 排序方式选择 -->
         <el-form-item label="排序">
-          <el-select v-model="filters.sort_by" @change="fetchSpots">
+          <el-select v-model="filters.sort_by" @change="fetchSpots" class="sort-select">
             <el-option label="评分最高" value="rating" />
             <el-option label="名称正序" value="name" />
           </el-select>
         </el-form-item>
         <!-- 操作按钮 -->
         <el-form-item>
-          <el-button type="primary" @click="handleSearch">搜索</el-button>
-          <el-button @click="resetFilters">重置</el-button>
+          <el-button type="primary" @click="handleSearch" class="search-btn">
+            <el-icon><Search /></el-icon>
+            搜索
+          </el-button>
+          <el-button @click="resetFilters" class="reset-btn">
+            <el-icon><RefreshLeft /></el-icon>
+            重置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
+    <!-- 统计信息栏 -->
+    <div class="stats-bar" v-if="!loading && spots.length > 0">
+      <span class="stats-text">
+        <el-icon><TrendCharts /></el-icon>
+        共找到 <strong>{{ total }}</strong> 个景点
+      </span>
+    </div>
+
     <!-- 景点列表网格，v-loading 显示加载状态 -->
-    <div class="spot-grid" v-loading="loading">
-      <el-row :gutter="20">
+    <div class="spot-grid" v-loading="loading" element-loading-text="加载中...">
+      <el-row :gutter="24">
         <!-- 遍历景点列表，生成卡片 -->
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="spot in spots" :key="spot.id" class="spot-col">
-          <el-card class="spot-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToDetail(spot.id)">
+        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="(spot, index) in spots" :key="spot.id" class="spot-col">
+          <el-card 
+            class="spot-card" 
+            :body-style="{ padding: '0px' }" 
+            shadow="hover" 
+            @click="goToDetail(spot.id)"
+            :style="{ animationDelay: `${index * 0.05}s` }"
+          >
             <!-- 景点图片 -->
-            <img :src="spot.image_url || 'https://via.placeholder.com/300x200?text=暂无图片'" class="spot-image" />
+            <div class="image-wrapper">
+              <img 
+                :src="cleanUrl(spot.image_url) || 'https://via.placeholder.com/300x200?text=暂无图片'" 
+                class="spot-image" 
+                :alt="spot.name"
+                @error="handleImageError"
+              />
+              <!-- 评分标签 -->
+              <div class="rating-badge">
+                <el-icon><StarFilled /></el-icon>
+                <span>{{ spot.rating }}</span>
+              </div>
+            </div>
             <!-- 景点信息 -->
             <div class="spot-info">
-              <h3 class="spot-name">{{ spot.name }}</h3>
+              <h3 class="spot-name" :title="spot.name">{{ spot.name }}</h3>
               <div class="spot-meta">
-                <el-tag size="small" type="info">{{ spot.city }}</el-tag>
-                <el-rate v-model="spot.rating" disabled show-score text-color="#ff9900" />
+                <el-tag size="small" type="info" class="city-tag">
+                  <el-icon><Location /></el-icon>
+                  {{ spot.city }}
+                </el-tag>
               </div>
-              <p class="spot-address" :title="spot.address"><el-icon><Location /></el-icon> {{ spot.address || '地址未知' }}</p>
+              <p class="spot-address" :title="spot.address">
+                <el-icon><Position /></el-icon>
+                {{ spot.address || '地址未知' }}
+              </p>
+              <!-- 查看详情按钮 -->
+              <div class="view-detail-btn">
+                <el-button type="primary" size="small" link>
+                  查看详情
+                  <el-icon><ArrowRight /></el-icon>
+                </el-button>
+              </div>
             </div>
           </el-card>
         </el-col>
       </el-row>
 
       <!-- 空状态：没有找到景点时显示 -->
-      <el-empty v-if="!loading && spots.length === 0" description="没有找到符合条件的景点" />
+      <div v-if="!loading && spots.length === 0" class="empty-state">
+        <el-empty description="没有找到符合条件的景点">
+          <el-button type="primary" @click="resetFilters">
+            <el-icon><RefreshLeft /></el-icon>
+            重置筛选
+          </el-button>
+        </el-empty>
+      </div>
     </div>
 
     <!-- 分页组件，只有在非搜索模式下显示 -->
@@ -69,6 +151,7 @@
         :total="total"
         @size-change="handleSizeChange"
         @current-change="handleCurrentChange"
+        class="custom-pagination"
       />
     </div>
   </div>
@@ -82,7 +165,10 @@ import { useRouter } from 'vue-router'
 // 引入 Element Plus 的消息提示
 import { ElMessage } from 'element-plus'
 // 引入 Element Plus 的图标
-import { Location } from '@element-plus/icons-vue'
+import { 
+  Location, Search, RefreshLeft, ArrowRight, 
+  StarFilled, Position, TrendCharts 
+} from '@element-plus/icons-vue'
 // 引入 API 接口
 import { getCities, getSpots, searchSpots as apiSearchSpots } from '../../api/spots'
 
@@ -149,6 +235,12 @@ const fetchSpots = async () => {
   }
 }
 
+// 处理评分变化
+const handleRatingChange = (val: number) => {
+  page.value = 1
+  fetchSpots()
+}
+
 // 事件处理：搜索按钮点击
 const handleSearch = () => {
   page.value = 1
@@ -182,6 +274,18 @@ const goToDetail = (id: number) => {
   router.push(`/spot/${id}`)
 }
 
+// 清理图片 URL 的函数，去除反引号和空格
+const cleanUrl = (url: string) => {
+  if (!url) return ''
+  return url.trim().replace(/[` ]/g, '')
+}
+
+// 图片加载失败时的处理函数
+const handleImageError = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  img.src = 'https://via.placeholder.com/300x200?text=暂无图片'
+}
+
 // 组件挂载时执行
 onMounted(() => {
   fetchCities()
@@ -192,12 +296,22 @@ onMounted(() => {
 <style scoped>
 /* 景点列表页面容器样式 */
 .spot-list-container {
-  padding: 20px;
+  padding: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  background: linear-gradient(180deg, #f0f4f8 0%, #e9ecef 50%, #f8f9fa 100%);
+  min-height: calc(100vh - 60px);
+  animation: fadeIn 0.5s ease;
 }
 
 /* 筛选卡片样式 */
 .filter-card {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  border-radius: 20px;
+  border: none;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  animation: slideDown 0.6s ease;
 }
 
 /* 筛选表单样式 */
@@ -205,6 +319,122 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  gap: 8px;
+}
+
+/* 搜索输入框样式 */
+.search-input {
+  width: 280px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+}
+
+.search-input :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.2);
+}
+
+.search-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 4px 20px rgba(64, 158, 255, 0.3);
+}
+
+/* 城市选择器样式 */
+.city-select,
+.sort-select {
+  width: 150px;
+}
+
+.city-select :deep(.el-select__wrapper),
+.sort-select :deep(.el-select__wrapper) {
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* 评分选择器样式 */
+.rating-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #f5f7fa;
+  border-radius: 20px;
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 10;
+}
+
+.rating-selector:hover {
+  background: #ecf5ff;
+}
+
+.rating-star {
+  cursor: pointer;
+  position: relative;
+  z-index: 20;
+}
+
+.rating-star :deep(.el-rate__item) {
+  cursor: pointer;
+}
+
+.rating-star :deep(.el-rate__icon) {
+  cursor: pointer;
+}
+
+.rating-text {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+  min-width: 90px;
+}
+
+/* 按钮样式 */
+.search-btn {
+  border-radius: 20px;
+  padding: 0 24px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.search-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.4);
+}
+
+.reset-btn {
+  border-radius: 20px;
+  padding: 0 20px;
+  transition: all 0.3s ease;
+}
+
+.reset-btn:hover {
+  transform: translateY(-2px);
+}
+
+/* 统计信息栏 */
+.stats-bar {
+  margin-bottom: 20px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  border-radius: 12px;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+}
+
+.stats-text {
+  font-size: 14px;
+}
+
+.stats-text strong {
+  font-size: 18px;
+  font-weight: 600;
 }
 
 /* 景点网格样式 */
@@ -214,22 +444,38 @@ onMounted(() => {
 
 /* 景点列样式 */
 .spot-col {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 /* 景点卡片样式 */
 .spot-card {
   height: 100%;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   display: flex;
   flex-direction: column;
+  border-radius: 20px;
+  border: none;
+  overflow: hidden;
+  animation: fadeInUp 0.7s ease forwards;
+  opacity: 0;
+  background: white;
 }
 
 /* 卡片悬停效果 */
 .spot-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1) !important;
+  transform: translateY(-12px) scale(1.02);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.18) !important;
+}
+
+.spot-card:hover::before {
+  opacity: 1;
+}
+
+/* 图片包装器 */
+.image-wrapper {
+  position: relative;
+  overflow: hidden;
 }
 
 /* 景点图片样式 */
@@ -237,11 +483,34 @@ onMounted(() => {
   width: 100%;
   height: 200px;
   object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spot-card:hover .spot-image {
+  transform: scale(1.1);
+}
+
+/* 评分标签 */
+.rating-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: linear-gradient(135deg, #ff9900 0%, #ffb347 100%);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(255, 153, 0, 0.4);
+  backdrop-filter: blur(10px);
 }
 
 /* 景点信息区域样式 */
 .spot-info {
-  padding: 15px;
+  padding: 18px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -249,36 +518,102 @@ onMounted(() => {
 
 /* 景点名称样式 */
 .spot-name {
-  margin: 0 0 10px;
-  font-size: 16px;
-  font-weight: bold;
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #303133;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 /* 景点元信息样式 */
 .spot-meta {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
 }
 
+/* 城市标签 */
+.city-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 12px;
+  padding: 4px 10px;
+}
+
 /* 景点地址样式 */
 .spot-address {
-  margin: auto 0 0;
-  font-size: 12px;
-  color: #999;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #909399;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 查看详情按钮 */
+.view-detail-btn {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed #ebeef5;
 }
 
 /* 分页容器样式 */
 .pagination-container {
   display: flex;
   justify-content: center;
-  margin-top: 20px;
+  margin-top: 32px;
+  padding: 20px;
+}
+
+/* 自定义分页样式 */
+.custom-pagination {
+  background: white;
+  padding: 16px 32px;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* 空状态样式 */
+.empty-state {
+  padding: 60px 0;
+}
+
+/* 动画定义 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

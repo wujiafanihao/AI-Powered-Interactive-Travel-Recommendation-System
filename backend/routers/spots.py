@@ -19,6 +19,59 @@ from database import DB_PATH
 router = APIRouter(prefix="/spots", tags=["景点"])
 
 
+def calculate_composite_rating(spot_id: int, conn) -> float:
+    """
+    计算景点的综合评分
+    综合考虑：评论评分、用户行为评分、原始基础评分
+    """
+    cursor = conn.cursor()
+    
+    # 获取原始基础评分
+    cursor.execute("SELECT rating FROM spots WHERE id = ?", (spot_id,))
+    base_rating_row = cursor.fetchone()
+    base_rating = base_rating_row[0] if base_rating_row and base_rating_row[0] else 3.0
+    
+    # 获取评论平均评分
+    cursor.execute("""
+        SELECT AVG(rating) as avg_rating, COUNT(*) as count 
+        FROM spot_comments 
+        WHERE spot_id = ?
+    """, (spot_id,))
+    comment_result = cursor.fetchone()
+    comment_avg = comment_result[0] if comment_result[0] else None
+    comment_count = comment_result[1] if comment_result[1] else 0
+    
+    # 获取用户行为评分（浏览时长、收藏等）
+    cursor.execute("""
+        SELECT AVG(rating) as avg_behavior_rating, COUNT(*) as count 
+        FROM user_behaviors 
+        WHERE spot_id = ? AND rating IS NOT NULL
+    """, (spot_id,))
+    behavior_result = cursor.fetchone()
+    behavior_avg = behavior_result[0] if behavior_result[0] else None
+    behavior_count = behavior_result[1] if behavior_result[1] else 0
+    
+    # 计算权重
+    total_weight = 1.0
+    final_rating = base_rating * 0.3  # 基础评分权重 30%
+    
+    if comment_avg and comment_count > 0:
+        comment_weight = min(0.5, 0.2 + comment_count * 0.03)  # 评论越多权重越高，最高 50%
+        final_rating += comment_avg * comment_weight
+        total_weight += comment_weight
+    
+    if behavior_avg and behavior_count > 0:
+        behavior_weight = min(0.3, 0.1 + behavior_count * 0.02)  # 行为数据权重，最高 30%
+        final_rating += behavior_avg * behavior_weight
+        total_weight += behavior_weight
+    
+    # 归一化评分到 0-5 范围
+    final_rating = final_rating / total_weight
+    final_rating = max(1.0, min(5.0, final_rating))  # 确保在 1-5 之间
+    
+    return round(final_rating, 1)
+
+
 @router.get("", summary="获取景点列表")
 async def get_spots(
     page: int = Query(1, ge=1, description="页码"),
@@ -71,20 +124,23 @@ async def get_spots(
     """, params + [page_size, offset])
 
     rows = cursor.fetchall()
-    conn.close()
 
     items = []
     for row in rows:
+        spot_id = row["id"]
+        composite_rating = calculate_composite_rating(spot_id, conn)
         items.append({
-            "id": row["id"],
+            "id": spot_id,
             "name": row["name"],
             "city": row["city"],
-            "rating": row["rating"],
+            "rating": composite_rating,
             "image_url": row["image_url"],
             "spot_type": row["spot_type"],
             "suggest_time": row["suggest_time"],
             "address": row["address"],
         })
+    
+    conn.close()
 
     return {
         "items": items,
@@ -129,9 +185,16 @@ async def search_spots(
     """, (f"%{q}%", f"%{q}%", f"%{q}%", limit))
 
     rows = cursor.fetchall()
-    conn.close()
 
-    items = [dict(row) for row in rows]
+    items = []
+    for row in rows:
+        spot_id = row["id"]
+        composite_rating = calculate_composite_rating(spot_id, conn)
+        spot_dict = dict(row)
+        spot_dict["rating"] = composite_rating
+        items.append(spot_dict)
+    
+    conn.close()
     return {"items": items, "total": len(items), "query": q}
 
 
@@ -162,12 +225,16 @@ async def get_spot_detail(spot_id: int):
 
     cursor.execute("SELECT * FROM spots WHERE id = ?", (spot_id,))
     row = cursor.fetchone()
-    conn.close()
 
     if not row:
+        conn.close()
         raise HTTPException(status_code=404, detail="景点不存在")
 
     spot = dict(row)
+    
+    # 使用综合评分
+    spot["rating"] = calculate_composite_rating(spot_id, conn)
+    
     # 解析JSON字段
     try:
         spot["spot_type"] = json.loads(spot.get("spot_type") or "[]")
@@ -177,5 +244,6 @@ async def get_spot_detail(spot_id: int):
         spot["target_group"] = json.loads(spot.get("target_group") or "[]")
     except json.JSONDecodeError:
         spot["target_group"] = []
-
+    
+    conn.close()
     return spot
