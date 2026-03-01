@@ -128,15 +128,15 @@
               <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="(item, index) in recommendations" :key="index" class="recommend-col">
                 <el-card class="recommend-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(item.spot_id)">
                   <!-- 推荐算法标签，悬浮在卡片左上角 -->
-                  <div class="recommend-badge" :class="item.algorithm">{{ getAlgorithmName(item.algorithm) }}</div>
+                  <div class="recommend-badge" :class="item.source || item.algorithm">{{ getAlgorithmName(item.source || item.algorithm) }}</div>
                   <!-- 景点图片 -->
-                  <img :src="item.details?.image_url || 'https://via.placeholder.com/300x200?text=暂无图片'" class="recommend-img" />
+                  <img :src="(item.image_url || '').trim() || 'https://via.placeholder.com/300x200?text=暂无图片'" class="recommend-img" />
                   <!-- 推荐信息 -->
                   <div class="recommend-info">
-                    <h3 class="recommend-name" :title="item.details?.name">{{ item.details?.name || '未知景点' }}</h3>
+                    <h3 class="recommend-name" :title="item.name">{{ item.name || '未知景点' }}</h3>
                     <div class="recommend-meta">
                       <!-- 城市标签 -->
-                      <el-tag size="small" type="info">{{ item.details?.city || '未知城市' }}</el-tag>
+                      <el-tag size="small" type="info">{{ item.city || '未知城市' }}</el-tag>
                       <!-- 推荐度分数 -->
                       <span class="score-text">推荐度: {{(item.score * 100).toFixed(0)}}%</span>
                     </div>
@@ -276,15 +276,18 @@ const getAlgorithmName = (algo: string) => {
     'collaborative': '猜你喜欢',
     'content': '相似内容',
     'hot': '热门推荐',
-    'scene': '场景匹配'
+    'scene': '场景匹配',
+    'cb': '猜你喜欢',
+    'cf': '相似用户'
   }
   return map[algo] || '推荐'
 }
 
 // 辅助函数：获取推荐理由
 const getRecommendReason = (item: any) => {
-  if (item.algorithm === 'collaborative') return '与你品味相似的用户也喜欢'
-  if (item.algorithm === 'content') return '根据你最近的浏览历史推荐'
+  if (item.reason) return item.reason
+  if (item.algorithm === 'collaborative' || item.source === 'cf') return '与你品味相似的用户也喜欢'
+  if (item.algorithm === 'content' || item.source === 'cb') return '根据你最近的浏览历史推荐'
   if (item.algorithm === 'hot') return '近期大家都在去的热门景点'
   return '系统精选推荐'
 }
