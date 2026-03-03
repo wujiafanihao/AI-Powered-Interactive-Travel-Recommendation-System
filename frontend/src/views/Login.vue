@@ -113,17 +113,37 @@ const handleLogin = async () => {
 </script>
 
 <style scoped>
-/* 登录页面容器样式：垂直水平居中，全屏高度，浅灰色背景 */
+/* 登录页面容器样式：垂直水平居中，全屏高度，渐变背景动画 */
 .login-container {
   display: flex;
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background-color: #f0f2f5;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  background-size: 400% 400%;
+  animation: gradientAnimation 8s ease infinite;
 }
+
+@keyframes gradientAnimation {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 /* 登录卡片宽度 */
 .box-card {
   width: 400px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 /* 卡片头部样式：居中，加粗字体 */
 .card-header {
