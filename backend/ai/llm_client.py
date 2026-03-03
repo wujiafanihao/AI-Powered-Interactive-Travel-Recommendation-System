@@ -156,7 +156,7 @@ class LLMClient:
             return self._get_fallback_chat_response(user_message)
 
     async def chat_with_context(self, user_message: str, context_docs: list[str],
-                                 system_prompt: str = None) -> str:
+                                 system_prompt: str = None, history: list[dict] = None) -> str:
         """
         带上下文文档的对话（RAG核心）
 
@@ -201,8 +201,17 @@ class LLMClient:
 
         messages = [
             SystemMessage(content=full_prompt),
-            HumanMessage(content=user_message),
         ]
+
+        # 追加历史对话（带上记忆）
+        if history:
+            for msg in history[-10:]:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    messages.append(AIMessage(content=msg["content"]))
+                    
+        messages.append(HumanMessage(content=user_message))
 
         # 调用 LLM，带有重试机制
         try:

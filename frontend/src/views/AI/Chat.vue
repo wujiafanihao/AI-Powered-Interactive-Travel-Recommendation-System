@@ -54,7 +54,12 @@
                         <img :src="spot.image_url || 'https://via.placeholder.com/150x100?text=暂无图片'" class="spot-img" />
                         <div class="spot-info">
                           <div class="spot-name" :title="spot.name">{{ spot.name }}</div>
-                          <div class="spot-rating"><el-rate v-model="spot.rating" disabled show-score text-color="#ff9900" /></div>
+                          <div class="spot-rating">
+                            <el-rate v-model="spot.rating" disabled show-score text-color="#ff9900" />
+                          </div>
+                          <div v-if="spot.hybrid_score" class="spot-hybrid-score">
+                            🔥 混合得分: {{ Number(spot.hybrid_score).toFixed(0) }}
+                          </div>
                         </div>
                       </el-card>
                     </el-col>
@@ -111,12 +116,15 @@
     <el-drawer v-model="drawerVisible" title="推荐景点列表" size="400px">
       <div class="drawer-spot-list">
         <el-card v-for="spot in currentSpots" :key="spot.id" class="drawer-spot-card" @click="goToSpot(spot.id)">
-          <div class="drawer-spot-content">
+           <div class="drawer-spot-content">
             <img :src="spot.image_url || 'https://via.placeholder.com/100x100?text=暂无图片'" class="drawer-spot-img" />
             <div class="drawer-spot-info">
               <h4>{{ spot.name }}</h4>
               <p>{{ spot.city }}</p>
               <el-rate v-model="spot.rating" disabled show-score text-color="#ff9900" />
+              <div v-if="spot.hybrid_score" class="drawer-spot-hybrid-score">
+                🔥 混合得分: {{ Number(spot.hybrid_score).toFixed(0) }}
+              </div>
             </div>
           </div>
         </el-card>
@@ -564,6 +572,12 @@ onMounted(() => {
   margin-bottom: 5px;
 }
 
+.spot-hybrid-score {
+  font-size: 11px;
+  color: #f56c6c;
+  margin-top: 4px;
+}
+
 .more-spots {
   text-align: center;
   margin-top: 10px;
@@ -673,5 +687,11 @@ onMounted(() => {
   margin: 0 0 10px 0;
   font-size: 13px;
   color: #909399;
+}
+
+.drawer-spot-hybrid-score {
+  font-size: 11px;
+  color: #f56c6c;
+  margin-top: 5px;
 }
 </style>

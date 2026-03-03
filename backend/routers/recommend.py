@@ -45,6 +45,17 @@ async def get_recommendations(
     """
     recommender = get_recommender()
     result = recommender.get_recommendation_with_details(current_user["id"], n)
+    
+    # 终端打印推荐的混合得分结果
+    items = result.get("items", [])
+    if items:
+        print("\n============ 🔥 平常用户浏览 - 混合得分结果排布 ============")
+        for idx, s in enumerate(items[:10]):
+            score = s.get('score', 0)
+            score_display = score if score > 1 else score * 100
+            print(f" [Top {idx+1}] {s.get('name', '未知')} - 混合/推荐得分: {score_display:.2f}")
+        print("============================================================\n")
+
     return result
 
 
@@ -171,6 +182,13 @@ async def record_feedback(
     current_user: dict = Depends(get_current_user),
 ):
     """记录推荐曝光/点击/收藏/评分反馈。"""
+    
+    # 终端打印用户的点击/交互事件
+    if data.event_type in ["click", "exposure"]:
+        action_name = "点击" if data.event_type == "click" else "曝光"
+        score_info = f"，相关得分: {data.score}" if data.score else ""
+        print(f"👋 [行为反馈] 用户 {current_user['username']} 触发了卡片的 {action_name} 操作 -> 景点: {data.spot_id}, 来源: {data.source}{score_info}")
+        
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 

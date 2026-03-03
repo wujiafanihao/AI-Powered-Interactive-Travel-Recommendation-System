@@ -225,8 +225,8 @@ def get_hybrid_recommendations(user_id: int, conditions: dict, top_n: int = 10) 
     if conditions.get('target_group'):
         scene = conditions['target_group'] + '游'
     
-    # 获取推荐结果（候选池放大到 500 以覆盖目标城市的候选数据）
-    raw_recs = engine.recommend(user_id, n=top_n * 50, scene=scene)
+    # 获取推荐结果（候选池放大到 5000 以覆盖目标城市的候选数据）
+    raw_recs = engine.recommend(user_id, n=top_n * 500, scene=scene)
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -262,8 +262,15 @@ def get_hybrid_recommendations(user_id: int, conditions: dict, top_n: int = 10) 
                 spot_types = json.loads(spot_types_raw) if spot_types_raw else []
             except (json.JSONDecodeError, TypeError):
                 spot_types = []
-            if conditions['spot_type'] in spot_types or conditions['spot_type'] in str(spot_types_raw):
-                condition_bonus += 300.0
+            
+            if conditions['spot_type'] in spot_types:
+                # 判断是否是主类型（即第一个元素）
+                if spot_types[0] == conditions['spot_type']:
+                    condition_bonus += 800.0  # 主类型大幅加分
+                else:
+                    condition_bonus += 100.0  # 附带类型少量加分
+            elif conditions['spot_type'] in str(spot_types_raw):
+                condition_bonus += 100.0
 
         # 目标人群匹配
         if conditions.get('target_group'):
@@ -272,8 +279,14 @@ def get_hybrid_recommendations(user_id: int, conditions: dict, top_n: int = 10) 
                 targets = json.loads(target_raw) if target_raw else []
             except (json.JSONDecodeError, TypeError):
                 targets = []
-            if conditions['target_group'] in targets or conditions['target_group'] in str(target_raw):
-                condition_bonus += 300.0
+                
+            if conditions['target_group'] in targets:
+                if targets and targets[0] == conditions['target_group']:
+                    condition_bonus += 800.0
+                else:
+                    condition_bonus += 200.0
+            elif conditions['target_group'] in str(target_raw):
+                condition_bonus += 100.0
 
         # 季节匹配
         if conditions.get('season'):
@@ -301,7 +314,12 @@ def get_hybrid_recommendations(user_id: int, conditions: dict, top_n: int = 10) 
         spot_type_display = '未知'
         try:
             types = json.loads(spot.get('spot_type', '[]') or '[]')
-            spot_type_display = types[0] if types else '未知'
+            if types:
+                if conditions.get('spot_type') and conditions['spot_type'] in types and types[0] != conditions['spot_type']:
+                    # 要求搜索的类型是副标签时，将它和主标签一起显示出来，缓解用户的错觉
+                    spot_type_display = f"{types[0]},{conditions['spot_type']}"
+                else:
+                    spot_type_display = types[0]
         except (json.JSONDecodeError, TypeError):
             spot_type_display = '未知'
 

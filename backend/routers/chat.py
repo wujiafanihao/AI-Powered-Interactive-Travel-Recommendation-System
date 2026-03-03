@@ -98,14 +98,22 @@ async def chat(
         print(f"📚 参考来源: {result.get('sources')}")
     print(f"========================================\n")
 
-    # 保存AI回复到历史
+    # 保存AI回复及其附带的数据卡片到历史
+    import json
+    metadata_json = json.dumps({
+        "intent": result.get("intent"),
+        "spots": result.get("spots", []),
+        "sources": result.get("sources", [])
+    }, ensure_ascii=False)
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO chat_history (user_id, role, content, session_id)
-        VALUES (?, 'assistant', ?, ?)
-    """, (user_id, result["reply"], session_id))
+        INSERT INTO chat_history (user_id, role, content, session_id, metadata)
+        VALUES (?, 'assistant', ?, ?, ?)
+    """, (user_id, result["reply"], session_id, metadata_json))
     conn.commit()
+    conn.close()
     conn.close()
 
     return ChatResponse(
@@ -179,13 +187,20 @@ async def spot_chat(
     llm_client = get_llm_client()
     reply = await llm_client.chat(data.message, system_prompt=system_prompt, history=history)
 
-    # 保存AI回复
+    # 保存AI回复及其附件卡片
+    import json
+    metadata_json = json.dumps({
+        "intent": "spot_qa",
+        "spots": [_to_card_spot(dict(spot))] if '_to_card_spot' in globals() else [dict(spot)],
+        "sources": []
+    }, ensure_ascii=False)
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO chat_history (user_id, role, content, session_id)
-        VALUES (?, 'assistant', ?, ?)
-    """, (user_id, reply, session_id))
+        INSERT INTO chat_history (user_id, role, content, session_id, metadata)
+        VALUES (?, 'assistant', ?, ?, ?)
+    """, (user_id, reply, session_id, metadata_json))
     conn.commit()
     conn.close()
 
@@ -212,13 +227,13 @@ async def get_chat_history(
 
     if session_id:
         cursor.execute("""
-            SELECT role, content, created_at FROM chat_history
+            SELECT role, content, session_id, created_at, metadata FROM chat_history
             WHERE user_id = ? AND session_id = ?
             ORDER BY created_at ASC LIMIT ?
         """, (current_user["id"], session_id, limit))
     else:
         cursor.execute("""
-            SELECT role, content, session_id, created_at FROM chat_history
+            SELECT role, content, session_id, created_at, metadata FROM chat_history
             WHERE user_id = ?
             ORDER BY created_at DESC LIMIT ?
         """, (current_user["id"], limit))
@@ -226,7 +241,22 @@ async def get_chat_history(
     rows = cursor.fetchall()
     conn.close()
 
-    messages = [dict(row) for row in rows]
+    import json
+    messages = []
+    for row in rows:
+        msg = dict(row)
+        if msg.get("metadata"):
+            try:
+                meta = json.loads(msg["metadata"])
+                msg["intent"] = meta.get("intent")
+                msg["spots"] = meta.get("spots")
+                msg["sources"] = meta.get("sources")
+            except Exception:
+                pass
+        # 清理不必要的内部字段，以确保干净的输出格式
+        msg.pop("metadata", None)
+        messages.append(msg)
+        
     if not session_id:
         messages.reverse()
 

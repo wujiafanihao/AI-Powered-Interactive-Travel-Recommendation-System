@@ -139,6 +139,7 @@ CREATE_TABLES_SQL = [
         role            TEXT    NOT NULL CHECK(role IN ('user','assistant','system')),
         content         TEXT    NOT NULL,
         session_id      TEXT    NOT NULL,
+        metadata        TEXT,   -- 新增：存储包含查询卡片(spots)/意图(intent)的信息
         created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -247,6 +248,13 @@ def ensure_schema_upgrades(conn: sqlite3.Connection):
         if column_name not in existing_columns:
             cursor.execute(alter_sql)
 
+    # 给 chat_history 补字段
+    existing_chat_cols = {
+        row[1] for row in cursor.execute("PRAGMA table_info(chat_history);").fetchall()
+    }
+    if "metadata" not in existing_chat_cols:
+         cursor.execute("ALTER TABLE chat_history ADD COLUMN metadata TEXT;")
+
 
 async def ensure_schema_upgrades_async(db: aiosqlite.Connection):
     """
@@ -271,6 +279,12 @@ async def ensure_schema_upgrades_async(db: aiosqlite.Connection):
     for column_name, alter_sql in required_columns.items():
         if column_name not in existing_columns:
             await db.execute(alter_sql)
+
+    cursor_chat = await db.execute("PRAGMA table_info(chat_history);")
+    rows_chat = await cursor_chat.fetchall()
+    existing_chat_cols = {row[1] for row in rows_chat}
+    if "metadata" not in existing_chat_cols:
+        await db.execute("ALTER TABLE chat_history ADD COLUMN metadata TEXT;")
 
 
 def init_db_sync():

@@ -140,7 +140,7 @@
                       <!-- 城市标签 -->
                       <el-tag size="small" type="info">{{ item.city || '未知城市' }}</el-tag>
                       <!-- 推荐度分数 -->
-                      <span class="score-text">推荐度: {{(item.score * 100).toFixed(0)}}%</span>
+                      <span class="score-text">🔥 混合得分: {{(item.score * 100).toFixed(0)}}</span>
                     </div>
                     <div class="match-score" v-if="typeof item.match_score === 'number'">
                       匹配分：{{ item.match_score.toFixed(0) }}%

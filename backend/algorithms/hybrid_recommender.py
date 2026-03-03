@@ -127,16 +127,18 @@ class HybridRecommender:
 
         if behavior_count < 5:
             # 冷启动用户：画像 + 行为偏好联合推荐，同城优先
-            w_cf, w_cb, w_profile = 0.0, 0.30, 0.70
-        elif behavior_count < 20:
-            # 成长用户：画像权重从 60% 线性降到 25%
-            ratio = (behavior_count - 5) / 15.0  # 0.0 ~ 1.0
-            w_cf = 0.35 * ratio
-            w_profile = 0.60 - (0.35 * ratio)  # 从 0.60 降到 0.25
+            w_cf, w_cb, w_profile = 0.0, 0.40, 0.60
+        elif behavior_count < 30:
+            # 成长用户：使用更平滑的权重下降曲线，避免陡峭突变
+            ratio = (behavior_count - 5) / 25.0  # 0.0 ~ 1.0
+            # 引入对数平滑因子，让初期内容推荐权重退让更慢
+            smooth_ratio = (ratio ** 0.8) 
+            w_cf = 0.45 * smooth_ratio
+            w_profile = 0.60 - (0.35 * smooth_ratio)
             w_cb = 1.0 - w_cf - w_profile
         else:
-            # 成熟用户：标准权重
-            w_cf, w_cb, w_profile = 0.55, 0.20, 0.25
+            # 成熟用户：历史行为最丰富，更信任协同过滤计算群智
+            w_cf, w_cb, w_profile = 0.55, 0.25, 0.20
 
         return w_cf, w_cb, w_profile
 
@@ -333,7 +335,8 @@ class HybridRecommender:
         # 协同过滤推荐
         cf_results = {}
         if w_cf > 0:
-            cf_recs = self.cf_engine.recommend(user_id, n=n * 3)
+            # 扩大协同候选池，防止漏掉优质景点
+            cf_recs = self.cf_engine.recommend(user_id, n=max(n * 20, 200))
             for rec in cf_recs:
                 # 把预测评分归一化到 0-1
                 normalized_score = rec["predicted_rating"] / 5.0
@@ -345,15 +348,16 @@ class HybridRecommender:
         # 内容推荐
         cb_results = {}
         if w_cb > 0:
-            cb_recs = self.cb_engine.recommend(user_id, n=n * 3)
+            # 扩大内容推荐候选池
+            cb_recs = self.cb_engine.recommend(user_id, n=max(n * 20, 200))
             for rec in cb_recs:
                 cb_results[rec["spot_id"]] = {
                     "score": rec["similarity"],
                     "reason": rec["reason"],
                 }
 
-        # 用户画像推荐（补充同城/同偏好景点）
-        profile_recs = self.profile_engine.recommend(user_id, n=n * 10)
+        # 用户画像推荐（补充同城/同偏好景点），进一步扩大圈层
+        profile_recs = self.profile_engine.recommend(user_id, n=max(n * 30, 300))
         profile_results = {}
         for rec in profile_recs:
             profile_results[rec["spot_id"]] = {
@@ -397,13 +401,24 @@ class HybridRecommender:
             match_score = profile_scores.get(spot_id, 0.0)
             profile_score = match_score / 100.0
             
-            cursor.execute("SELECT city FROM spots WHERE id = ?", (spot_id,))
-            spot_city_row = cursor.fetchone()
-            spot_city = spot_city_row[0] if spot_city_row else ""
+            cursor.execute("SELECT city, rating FROM spots WHERE id = ?", (spot_id,))
+            spot_row = cursor.fetchone()
+            spot_city = spot_row[0] if spot_row else ""
+            spot_rating = spot_row[1] if spot_row and spot_row[1] else 0.0
             
-            city_bonus = 0.08 if user_city and spot_city and user_city in spot_city else 0.0
+            # 1. 动态过滤低质底噪(若总分为空且匹配分为零则丢弃，避免凑数)
+            if cf_score < 0.1 and cb_score < 0.1 and profile_score < 0.1:
+                 continue
             
-            hybrid_score = w_cf * cf_score + w_cb * cb_score + w_profile * profile_score + city_bonus
+            # 2. 同城加成和基础高分对数加成，让混合排序既考虑用户当前位置，也信赖社会共识高分
+            import math
+            city_bonus = 0.15 if user_city and spot_city and user_city in spot_city else 0.0
+            rating_bonus = 0.0
+            if spot_rating >= 4.0:
+                 # 引入评分增强对数衰退，4分基础得 0.05分奖励，5分最高得 0.15分红利
+                 rating_bonus = math.log10(spot_rating - 2.8) * 0.15
+            
+            hybrid_score = w_cf * cf_score + w_cb * cb_score + w_profile * profile_score + city_bonus + rating_bonus
 
             # 融合推荐理由
             reasons = []

@@ -199,19 +199,13 @@ class SmartSearcher:
         # 如果清理后为空（比如输入就是"区"），返回原始值
         return city.strip() if city.strip() else city_raw
 
-    async def extract_conditions(self, user_message: str) -> dict:
+    async def extract_conditions(self, user_message: str, history: list[dict] = None) -> dict:
         """
         从自然语言中提取搜索条件
 
         大白话说明：
             让 AI 从用户的话里提取出结构化的搜索条件。
-            比如 "秋天带老人去南京看枫叶" 提取出：
-            {
-                "city": "南京",
-                "season": "秋",
-                "target_group": "老年",
-                "keywords": ["枫叶"]
-            }
+            如果有历史对话，会将历史记录作为补充上下文组装在一起。
         """
         instruction = """请从用户的旅游需求描述中提取搜索条件，返回JSON格式：
 {
@@ -226,7 +220,13 @@ class SmartSearcher:
 2. keywords 要提取有利于搜索匹配的实体词（如'咖啡''海滩''古镇'），过滤掉纯修饰词
 3. 如果某个字段无法判断就填null"""
 
-        result = await self.llm_client.extract_json(user_message, instruction)
+        # 合并历史消息，以便进行多轮意图组合
+        combined_message = user_message
+        if history:
+            recent = [f"{m['role']}: {m['content']}" for m in history[-4:]]
+            combined_message = "【历史对话上下文】\n" + "\n".join(recent) + "\n\n【最新用户输入】\n" + user_message
+
+        result = await self.llm_client.extract_json(combined_message, instruction)
         if not result:
             return {}
 
@@ -236,14 +236,124 @@ class SmartSearcher:
 
         return result
 
-    def search_spots(self, conditions: dict, limit: int = 10) -> list[dict]:
+    def search_spots(self, conditions: dict, limit: int = 10, user_id: int = None) -> list[dict]:
         """
-        根据结构化条件搜索景点
+        根据结构化条件搜索景点（全面接入高精度混合推荐算法）
 
         大白话说明：
-            拿到提取的搜索条件后，构建SQL查询语句，
-            从数据库里找出匹配的景点，按评分排序返回。
+            拿到提取的搜索条件后，结合用户的历史行为（user_id），
+            通过 CF、CB、Profile 三路混合引擎获取几千个基础候选，
+            再根据这次的条件计算匹配加分（Bonus），最终按总混合得分返回。
         """
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        results = []
+        
+        # =========== 步骤 1：如果有 user_id，使用混合增强搜索 ===========
+        if user_id:
+            try:
+                from algorithms.hybrid_recommender import HybridRecommender
+                engine = HybridRecommender(DB_PATH)
+                engine.initialize()
+                
+                # 推断下探 scene
+                scene = None
+                if conditions.get('target_group'):
+                    scene = conditions['target_group'] + '游'
+                
+                # 获取充足候选池
+                raw_recs = engine.recommend(user_id, n=limit * 100, scene=scene)
+                
+                for rec in raw_recs:
+                    spot_id = rec['spot_id']
+                    cursor.execute("SELECT * FROM spots WHERE id = ?", (spot_id,))
+                    spot_row = cursor.fetchone()
+                    if not spot_row:
+                        continue
+                    
+                    spot = dict(spot_row)
+                    condition_bonus = 0.0
+                    
+                    # 城市匹配
+                    if conditions.get('city') and spot['city'] == conditions['city']:
+                        condition_bonus += 5000.0
+                        
+                    # 景点类型匹配
+                    if conditions.get('spot_type'):
+                        spot_types_raw = spot.get('spot_type', '[]')
+                        try:
+                            spot_types = json.loads(spot_types_raw) if spot_types_raw else []
+                        except:
+                            spot_types = []
+                        if conditions['spot_type'] in spot_types:
+                            if spot_types and spot_types[0] == conditions['spot_type']:
+                                condition_bonus += 800.0
+                            else:
+                                condition_bonus += 100.0
+                        elif conditions['spot_type'] in str(spot_types_raw):
+                            condition_bonus += 100.0
+                            
+                    # 目标人群匹配
+                    if conditions.get('target_group'):
+                        target_raw = spot.get('target_group', '[]')
+                        try:
+                            targets = json.loads(target_raw) if target_raw else []
+                        except:
+                            targets = []
+                        if conditions['target_group'] in targets:
+                            if targets and targets[0] == conditions['target_group']:
+                                condition_bonus += 800.0
+                            else:
+                                condition_bonus += 200.0
+                        elif conditions['target_group'] in str(target_raw):
+                            condition_bonus += 100.0
+                            
+                    # 季节匹配
+                    if conditions.get('season'):
+                        season_text = str(spot.get('suggest_season', '') or '')
+                        if conditions['season'] in season_text or '四季' in season_text or '全年' in season_text:
+                            condition_bonus += 200.0
+                            
+                    # 免费匹配 (在 keywords 里找免费)
+                    kws_str = "".join(conditions.get('keywords', []))
+                    if '免费' in kws_str or '免门票' in kws_str:
+                        ticket = str(spot.get('ticket_info', '') or '')
+                        if '免费' in ticket or ticket == '0' or '免票' in ticket or '免门票' in ticket or ticket.strip() == '':
+                            condition_bonus += 200.0
+                            
+                    # 高分处理
+                    if conditions.get('high_rating', False):
+                        if (spot.get('rating') or 0) >= 4.0:
+                            condition_bonus += 100.0
+                            
+                    # 关键词文本匹配
+                    if conditions.get('keywords'):
+                        for kw in conditions['keywords'][:3]:
+                            if kw in str(spot.get('name', '')) or kw in str(spot.get('description', '')):
+                                condition_bonus += 150.0
+                                
+                    base_score = rec.get('score', 0) * 100
+                    hybrid_score = base_score + condition_bonus
+                    
+                    spot['base_score'] = base_score
+                    spot['condition_bonus'] = condition_bonus
+                    spot['hybrid_score'] = hybrid_score
+                    results.append(spot)
+                
+                # 按总混合分重排序
+                results.sort(key=lambda x: x.get('hybrid_score', 0), reverse=True)
+                
+                print(f"✅ 成功调用混合算法并二次排序, 最高得分: {results[0]['hybrid_score'] if results else 0}")
+                conn.close()
+                return results[:limit]
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"⚠️ 混合推荐搜索出错，降级为 SQL 模糊检索: {e}")
+        
+        # =========== 步骤 2：降级方案 (用户未登录或混合崩溃时走 SQL) ===========
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -301,27 +411,35 @@ class SmartSearcher:
 
         cursor.execute(sql, params)
         rows = cursor.fetchall()
+        
+        # SQL降级时，给个假的打分
+        for row in rows:
+             s = dict(row)
+             s["hybrid_score"] = 0.0 
+             results.append(s)
+             
         conn.close()
 
-        results = []
-        for row in rows:
-            results.append({
-                "id": row[0],
-                "spot_id": row[0],
-                "name": row[1],
-                "city": row[2],
-                "rating": row[3],
-                "image_url": row[4],
-                "spot_type": row[5],
-                "target_group": row[6],
-                "suggest_time": row[7],
-                "open_time": row[8],
-                "address": row[9],
-                "description": row[10],
-                "tips": row[11],
+        out = []
+        for row in results:
+            out.append({
+                "id": row.get("id"),
+                "spot_id": row.get("id"),
+                "name": row.get("name"),
+                "city": row.get("city"),
+                "rating": row.get("rating"),
+                "image_url": row.get("image_url"),
+                "spot_type": row.get("spot_type"),
+                "target_group": row.get("target_group"),
+                "suggest_time": row.get("suggest_time"),
+                "open_time": row.get("open_time"),
+                "address": row.get("address"),
+                "description": row.get("description"),
+                "tips": row.get("tips"),
+                "hybrid_score": row.get("hybrid_score", 0.0),
             })
 
-        return results
+        return out
 
 
 def _extract_tags(spot: dict) -> list[str]:
@@ -378,6 +496,7 @@ def _to_card_spot(spot: dict) -> dict:
         "image_url": spot.get("image_url") or "",
         "city": spot.get("city") or "",
         "rating": spot.get("rating"),
+        "hybrid_score": spot.get("hybrid_score"),
     }
 
 
@@ -448,7 +567,7 @@ class ChatService:
             return await self._handle_qa(user_message, history)
 
     async def _handle_search(self, user_message: str, user_id: int = None,
-                              user_profile: dict = None) -> dict:
+                              history: list[dict] = None, user_profile: dict = None) -> dict:
         """
         处理搜索意图
 
@@ -457,8 +576,8 @@ class ChatService:
         print(f"\n🔧 进入 _handle_search 处理搜索意图")
         # 提取搜索条件（即使失败也继续，用空条件搜索）
         try:
-            conditions = await self.smart_searcher.extract_conditions(user_message)
-            print(f"🔎 提取的搜索条件（LLM）: {conditions}")
+            conditions = await self.smart_searcher.extract_conditions(user_message, history=history)
+            print(f"🔎 提取的搜索条件（带记忆）: {conditions}")
         except Exception as e:
             print(f"⚠️ 搜索条件提取失败，使用空条件: {e}")
             conditions = {}
@@ -481,31 +600,22 @@ class ChatService:
             except Exception:
                 pass
 
-        # 搜索景点
-        spots = self.smart_searcher.search_spots(conditions, limit=30)
-        print(f"🔍 搜索到 {len(spots)} 个景点")
+        # 搜索景点 (使用包含算法的强化版搜索)
+        spots = self.smart_searcher.search_spots(conditions, limit=10, user_id=user_id)
+        print(f"🔍 [综合搜索] 共找到 {len(spots)} 个相关景点记录")
+        
+        # 终端打印推荐的混合得分和排序证明
+        if spots:
+            print("\n============ 🔥 推荐的混合得分结果排布 ============")
+            for idx, s in enumerate(spots[:5]):
+                 print(f" [Top {idx+1}] {s['name']} - 混合得分: {s.get('hybrid_score', 0):.4f}")
+            print("===================================================\n")
 
-        # ✅ 关键改进3：只要有用户ID就做画像重排，并修复综合排序逻辑
+        # 将综合分直接沿用混合分，如果前面兜底了，则不被覆盖
         if user_id and spots:
             try:
-                spot_ids = [s["spot_id"] for s in spots]
-                score_map = self.profile_engine.calculate_batch_scores(user_id, spot_ids)
-
-                # 给每个景点附上画像匹配分（0-100）
-                for s in spots:
-                    s["match_score"] = score_map.get(s["spot_id"], 0.0)
-
-                # 归一化景点评分到 0-100（和匹配分同量纲，才能加权合并）
-                max_rating = max((s.get("rating") or 0 for s in spots), default=5.0) or 5.0
-                for s in spots:
-                    rating_norm = ((s.get("rating") or 0) / max_rating) * 100
-                    profile_score = s["match_score"]
-                    # 综合分：评分权重 40% + 画像匹配权重 60%
-                    s["combined_score"] = 0.4 * rating_norm + 0.6 * profile_score
-
-                spots.sort(key=lambda s: s.get("combined_score", 0), reverse=True)
-                print(f"🎯 画像重排完成，Top3匹配分: "
-                      f"{[round(s.get('combined_score',0), 1) for s in spots[:3]]}")
+                # 刚才已经跑了 hybrid 引擎，没必要再单独查匹配分了，避免覆盖高精度的混合排分
+                pass
             except Exception as e:
                 print(f"⚠️ 画像重排失败，降级为评分排序: {e}")
                 spots.sort(key=lambda s: s.get("rating") or 0, reverse=True)
@@ -515,28 +625,38 @@ class ChatService:
         card_spots = [_to_card_spot(s) for s in card_spots_raw]
 
         # 让AI生成个性化推荐语
+        # 让AI在 RAG 最终步骤中，结合检索出来的精准资料，总结回答用户
         if card_spots:
             try:
-                spot_names = [f"{s['name']}({s['city']})" for s in card_spots]
-                # 把用户画像信息告诉 AI，让回复更贴心
+                # 拼接检索出来的精准景点信息，作为 RAG 上下文
+                context_docs = []
+                for s in card_spots_raw:
+                    desc = s.get('description', '')[:100].replace('\n', '')
+                    tips = s.get('tips', '')[:100].replace('\n', '')
+                    info = f"【{s['name']}】({s['city']}) - 评分: {s.get('rating')}\n简介: {desc}\n小贴士: {tips}"
+                    context_docs.append(info)
+                
                 profile_info = ""
                 if profile.get("city"):
-                    profile_info += f"用户所在城市：{profile['city']}。"
+                    profile_info += f"当前用户的常驻城市是：{profile['city']}。"
                 if profile.get("travel_style"):
-                    profile_info += f"旅游风格：{profile['travel_style']}。"
+                    profile_info += f"旅游偏好/风格：{profile['travel_style']}。"
 
                 llm = get_llm_client()
-                reply = await llm.chat(
-                    f"用户说：{user_message}\n{profile_info}\n"
-                    f"根据用户画像和语义理解，为他推荐了：{', '.join(spot_names)}\n"
-                    f"请用友好自然的口吻（2-3句话）说明为什么这些景点适合他，突出与他需求/位置/偏好的契合点。",
+                
+                # 调用具备强化记忆的 RAG 生成引擎
+                reply = await llm.chat_with_context(
+                    user_message=f"用户的需求是：{user_message}\n{profile_info}\n请基于上面提供的【混合推荐检索结果】向用户做个性化推荐回答。\n你必须使用段落和友好的语气总结这些景点。",
+                    context_docs=context_docs,
+                    history=history,
                     system_prompt=(
                         "你是一个懂用户的旅游向导，了解他的位置和偏好，像老朋友一样推荐景点。"
-                        "不要说'根据资料'或'为您查到'这类机械的话，直接说'这几个地方...'或'我觉得...'。"
+                        "绝不要说'根据资料'或'为您查到'这类死板的话，直接说'为你找到几个超赞的地方...'或'我觉得这几个很适合你...'。"
+                        "请利用提供的参考资料来提炼每个景点的亮点（1-2句短语概括即可，不要太长）。"
                     )
                 )
             except Exception as e:
-                print(f"⚠️ AI推荐语生成失败: {e}")
+                print(f"⚠️ AI RAG 生成失败: {e}")
                 reply = f"我为你找到了 {len(card_spots)} 个不错的景点，快看看吧！🗺️"
 
             return {
