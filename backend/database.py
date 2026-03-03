@@ -314,8 +314,10 @@ async def init_db_async():
             await db.execute(sql)
 
         # 老库补丁：补齐 users 新字段（异步版本）
+        cursor = await db.execute("PRAGMA table_info(users);")
+        rows = await cursor.fetchall()
         existing_columns = {
-            row[1] for row in (await db.execute("PRAGMA table_info(users);")).fetchall()
+            row[1] for row in rows
         }
 
         required_columns = {
