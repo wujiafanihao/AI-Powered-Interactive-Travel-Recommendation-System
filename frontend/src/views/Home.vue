@@ -307,7 +307,27 @@ const loadSceneSpots = async (sceneName: string) => {
   try {
     // 调用 API 获取场景推荐，默认返回 8 个景点
     const res = await getSceneRecommendations(sceneName, 8)
-    sceneSpots.value = res.items
+    const items = Array.isArray(res?.items) ? res.items : []
+    sceneSpots.value = items
+
+    // 登录用户上报场景推荐曝光（同一轮去重）
+    if (userStore.token) {
+      const exposed = new Set<number>()
+      for (const item of items) {
+        const spotId = Number(item?.spot_id || item?.id || 0)
+        if (!spotId || exposed.has(spotId)) continue
+        exposed.add(spotId)
+
+        recordRecommendFeedback({
+          spot_id: spotId,
+          event_type: 'exposure',
+          source: item?.source || item?.algorithm || 'scene',
+          score: typeof item?.score === 'number' ? item.score : undefined
+        }).catch((error) => {
+          console.error('上报场景推荐曝光失败:', error)
+        })
+      }
+    }
   } catch (error) {
     console.error('加载场景推荐失败:', error)
   } finally {
@@ -361,12 +381,13 @@ const handleSceneClick = (tab: any) => {
 const goToSpot = (id: number, item?: any) => {
   if (!id) return
 
-  if (userStore.token && item?.spot_id) {
+  const spotId = Number(item?.spot_id || item?.id || id)
+  if (userStore.token && spotId) {
     recordRecommendFeedback({
-      spot_id: item.spot_id,
+      spot_id: spotId,
       event_type: 'click',
-      source: item.source || item.algorithm,
-      score: typeof item.score === 'number' ? item.score : undefined
+      source: item?.source || item?.algorithm || 'scene',
+      score: typeof item?.score === 'number' ? item.score : undefined
     }).catch((e) => {
       console.error('上报推荐点击失败:', e)
     })

@@ -100,7 +100,7 @@
             class="spot-card" 
             :body-style="{ padding: '0px' }" 
             shadow="hover" 
-            @click="goToDetail(spot.id)"
+            @click="goToDetail(spot.id, spot)"
             :style="{ animationDelay: `${index * 0.05}s` }"
           >
             <!-- 景点图片 -->
@@ -233,13 +233,31 @@ const handleTabClick = (tab: any) => {
 // 加载个性化推荐
 const loadRecommendations = async () => {
   if (!userStore.token) return
-  
+
   recommendLoading.value = true
   loading.value = true
   try {
     const res = await getRecommendations(50)
-    spots.value = res.items || []
-    total.value = spots.value.length
+    const items = Array.isArray(res?.items) ? res.items : []
+    spots.value = items
+    total.value = items.length
+
+    // 上报推荐曝光（同一轮去重）
+    const exposed = new Set<number>()
+    for (const item of items) {
+      const spotId = Number(item?.spot_id || item?.id || 0)
+      if (!spotId || exposed.has(spotId)) continue
+      exposed.add(spotId)
+
+      recordRecommendFeedback({
+        spot_id: spotId,
+        event_type: 'exposure',
+        source: item?.source || item?.algorithm || 'recommend-tab',
+        score: typeof item?.score === 'number' ? item.score : undefined
+      }).catch((error) => {
+        console.error('上报推荐曝光失败:', error)
+      })
+    }
   } catch (error) {
     console.error('加载推荐失败:', error)
     ElMessage.error('加载推荐失败')
@@ -336,7 +354,19 @@ const handleCurrentChange = (val: number) => {
 }
 
 // 跳转到景点详情页
-const goToDetail = (id: number) => {
+const goToDetail = (id: number, item?: any) => {
+  const spotId = Number(item?.spot_id || item?.id || id)
+  if (userStore.token && activeTab.value === 'recommend' && spotId) {
+    recordRecommendFeedback({
+      spot_id: spotId,
+      event_type: 'click',
+      source: item?.source || item?.algorithm || 'recommend-tab',
+      score: typeof item?.score === 'number' ? item.score : undefined
+    }).catch((error) => {
+      console.error('上报推荐点击失败:', error)
+    })
+  }
+
   router.push(`/spot/${id}`)
 }
 
