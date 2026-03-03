@@ -55,18 +55,40 @@ async def chat(
     conn.commit()
     conn.close()
 
-    # 调用聊天服务处理消息
+    # 调用聊天服务处理消息（带上用户画像信息，用于个性化搜索）
     chat_service = get_chat_service()
+    
+    # 读取用户画像（城市、偏好），传给搜索流程做兜底
+    conn2 = sqlite3.connect(DB_PATH)
+    conn2.row_factory = sqlite3.Row
+    c2 = conn2.cursor()
+    c2.execute("""
+        SELECT u.city, u.travel_style, up.interest_tags, up.preferred_season
+        FROM users u
+        LEFT JOIN user_profiles up ON up.user_id = u.id
+        WHERE u.id = ?
+    """, (user_id,))
+    urow = c2.fetchone()
+    conn2.close()
+    user_profile_ctx = {}
+    if urow:
+        user_profile_ctx = {
+            "city": urow["city"] or None,
+            "travel_style": urow["travel_style"] or None,
+            "interest_tags": urow["interest_tags"] or None,
+            "preferred_season": urow["preferred_season"] or None,
+        }
     
     print(f"\n========== AI 对话调试信息 ==========")
     print(f"👤 用户消息: {data.message}")
-    print(f"🆔 用户ID: {user_id}")
+    print(f"🆔 用户ID: {user_id} | 用户画像: {user_profile_ctx}")
     print(f"📋 会话ID: {session_id}")
     
     result = await chat_service.process_message(
         user_message=data.message,
         user_id=user_id,
         history=history,
+        user_profile=user_profile_ctx,
     )
     
     print(f"🎯 识别意图: {result.get('intent', 'unknown')}")

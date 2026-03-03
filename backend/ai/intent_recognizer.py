@@ -120,6 +120,11 @@ class IntentRecognizer:
             "有什么", "哪里有", "哪里的", "什么好", "好去处",
             "玩什么", "逛什么", "吃什么", "最多", "最好",
             "游玩", "打卡", "网红", "必去", "值得去",
+            # ✅ 新增：更自然的表达方式
+            "我在", "现在在", "我想要", "我希望", "希望",
+            "历史文化", "自然风光", "人文", "古迹", "博物馆",
+            "找个", "找几个", "给我推", "帮我找", "想看",
+            "逛逛", "散步", "周末", "假期", "出游",
         ]
 
         # 问答意图的关键词
@@ -402,19 +407,21 @@ class ChatService:
         return self.rag_engine
 
     async def process_message(self, user_message: str, user_id: int = None,
-                               history: list[dict] = None) -> dict:
+                               history: list[dict] = None,
+                               user_profile: dict = None) -> dict:
         """
         处理用户消息（总入口）
 
         大白话说明：
             1. 先识别意图
-            2. 根据意图分发处理
+            2. 根据意图分发处理（搜索意图会结合用户画像做个性化排序）
             3. 返回统一格式的结果
 
         参数：
             user_message: 用户消息文本
             user_id: 用户ID（可选，用于个性化）
             history: 对话历史
+            user_profile: 用户画像字典（city/travel_style/interest_tags/preferred_season）
         返回：
             {
                 "reply": "AI的回复文本",
@@ -426,10 +433,11 @@ class ChatService:
         # 第一步：识别意图
         intent_result = await self.intent_recognizer.recognize(user_message)
         intent = intent_result["intent"]
+        print(f"🎯 意图识别: {intent} (置信度: {intent_result.get('confidence', '?')})")
 
         # 第二步：根据意图分发处理
         if intent == INTENT_SEARCH:
-            return await self._handle_search(user_message, user_id=user_id)
+            return await self._handle_search(user_message, user_id=user_id, user_profile=user_profile)
         elif intent == INTENT_QA:
             return await self._handle_qa(user_message, history)
         elif intent == INTENT_HELP:
@@ -439,60 +447,98 @@ class ChatService:
         else:
             return await self._handle_qa(user_message, history)
 
-    async def _handle_search(self, user_message: str, user_id: int = None) -> dict:
+    async def _handle_search(self, user_message: str, user_id: int = None,
+                              user_profile: dict = None) -> dict:
         """
         处理搜索意图
 
-        大白话：提取搜索条件 → 查数据库 → 让AI生成推荐语
+        大白话：提取搜索条件 → （用户画像兜底城市）→ 查数据库 → 画像重排 → AI生成推荐语
         """
         print(f"\n🔧 进入 _handle_search 处理搜索意图")
         # 提取搜索条件（即使失败也继续，用空条件搜索）
         try:
             conditions = await self.smart_searcher.extract_conditions(user_message)
-            print(f"🔎 提取的搜索条件: {conditions}")
+            print(f"🔎 提取的搜索条件（LLM）: {conditions}")
         except Exception as e:
-            print(f"⚠️ 搜索条件提取失败，使用空条件搜索: {e}")
+            print(f"⚠️ 搜索条件提取失败，使用空条件: {e}")
             conditions = {}
-        
+
+        # ✅ 关键改进1：用户画像城市兜底
+        # 如果对话里没有提到城市，但用户注册了所在城市，则用注册城市作为默认过滤
+        profile = user_profile or {}
+        if not conditions.get("city") and profile.get("city"):
+            conditions["city"] = self.smart_searcher._normalize_city(profile["city"])
+            print(f"📍 城市兜底（来自用户画像）: {conditions['city']}")
+
+        # ✅ 关键改进2：用户偏好类型兜底
+        # 如果对话没有提到景点类型，但用户有旅游风格设置，则作为辅助条件
+        if not conditions.get("spot_type") and profile.get("travel_style"):
+            import json as _json
+            try:
+                styles = _json.loads(profile["travel_style"]) if isinstance(profile["travel_style"], str) else []
+                if styles:
+                    conditions.setdefault("_preferred_types", styles)
+            except Exception:
+                pass
+
         # 搜索景点
-        spots = self.smart_searcher.search_spots(conditions, limit=12)
+        spots = self.smart_searcher.search_spots(conditions, limit=30)
         print(f"🔍 搜索到 {len(spots)} 个景点")
 
-        # 如果有用户ID，按画像匹配分重排
+        # ✅ 关键改进3：只要有用户ID就做画像重排，并修复综合排序逻辑
         if user_id and spots:
             try:
                 spot_ids = [s["spot_id"] for s in spots]
                 score_map = self.profile_engine.calculate_batch_scores(user_id, spot_ids)
-                spots.sort(key=lambda s: score_map.get(s["spot_id"], 0.0), reverse=True)
+
+                # 给每个景点附上画像匹配分（0-100）
                 for s in spots:
                     s["match_score"] = score_map.get(s["spot_id"], 0.0)
+
+                # 归一化景点评分到 0-100（和匹配分同量纲，才能加权合并）
+                max_rating = max((s.get("rating") or 0 for s in spots), default=5.0) or 5.0
+                for s in spots:
+                    rating_norm = ((s.get("rating") or 0) / max_rating) * 100
+                    profile_score = s["match_score"]
+                    # 综合分：评分权重 40% + 画像匹配权重 60%
+                    s["combined_score"] = 0.4 * rating_norm + 0.6 * profile_score
+
+                spots.sort(key=lambda s: s.get("combined_score", 0), reverse=True)
+                print(f"🎯 画像重排完成，Top3匹配分: "
+                      f"{[round(s.get('combined_score',0), 1) for s in spots[:3]]}")
             except Exception as e:
-                print(f"⚠️ 画像重排失败，降级为原始排序: {e}")
+                print(f"⚠️ 画像重排失败，降级为评分排序: {e}")
+                spots.sort(key=lambda s: s.get("rating") or 0, reverse=True)
 
-        # 标准化卡片：3-5 条
-        if len(spots) >= 5:
-            card_spots = spots[:5]
-        elif len(spots) >= 3:
-            card_spots = spots[:3]
-        else:
-            card_spots = spots
+        # 取前 5 条推荐
+        card_spots_raw = spots[:5] if len(spots) >= 5 else spots
+        card_spots = [_to_card_spot(s) for s in card_spots_raw]
 
-        card_spots = [_to_card_spot(s) for s in card_spots]
-
-        # 让AI生成一段推荐语（如果失败则用简单回复）
+        # 让AI生成个性化推荐语
         if card_spots:
             try:
-                spot_names = [f"{s['name']}({s['city']})" for s in card_spots[:5]]
+                spot_names = [f"{s['name']}({s['city']})" for s in card_spots]
+                # 把用户画像信息告诉 AI，让回复更贴心
+                profile_info = ""
+                if profile.get("city"):
+                    profile_info += f"用户所在城市：{profile['city']}。"
+                if profile.get("travel_style"):
+                    profile_info += f"旅游风格：{profile['travel_style']}。"
+
                 llm = get_llm_client()
                 reply = await llm.chat(
-                    f"用户想找：{user_message}\n我搜到了这些景点：{', '.join(spot_names)}\n"
-                    f"请用友好的口吻简要介绍为什么推荐这些景点（2-3句话即可）",
-                    system_prompt="你是一个经验丰富的旅游向导，像老朋友一样自然地推荐景点，不要说'根据资料'或'为您查到'这类机械的话。"
+                    f"用户说：{user_message}\n{profile_info}\n"
+                    f"根据用户画像和语义理解，为他推荐了：{', '.join(spot_names)}\n"
+                    f"请用友好自然的口吻（2-3句话）说明为什么这些景点适合他，突出与他需求/位置/偏好的契合点。",
+                    system_prompt=(
+                        "你是一个懂用户的旅游向导，了解他的位置和偏好，像老朋友一样推荐景点。"
+                        "不要说'根据资料'或'为您查到'这类机械的话，直接说'这几个地方...'或'我觉得...'。"
+                    )
                 )
             except Exception as e:
-                print(f"⚠️ AI推荐语生成失败，使用简单回复: {e}")
-                reply = f"太好了！我为你找到了 {len(card_spots)} 个不错的景点～ 你可以看看下面的卡片，有感兴趣的就点进去了解详情吧！🗺️"
-            
+                print(f"⚠️ AI推荐语生成失败: {e}")
+                reply = f"我为你找到了 {len(card_spots)} 个不错的景点，快看看吧！🗺️"
+
             return {
                 "reply": reply,
                 "intent": INTENT_SEARCH,
@@ -500,7 +546,7 @@ class ChatService:
                 "conditions": conditions,
             }
         else:
-            # 结构化搜索没结果，退化到 RAG 向量检索，并传递已提取的城市信息
+            # 结构化搜索没结果，退化到 RAG 向量检索
             city = conditions.get("city")
             print(f"⚠️ 结构化搜索未找到结果，退化为 RAG 问答（城市过滤: {city}）...")
             return await self._handle_qa_with_city(user_message, None, city_filter=city)

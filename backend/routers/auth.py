@@ -312,8 +312,7 @@ async def update_me(data: UserUpdate, current_user: dict = Depends(get_current_u
     # 同步创建或更新 user_profiles 表
     # 大白话：确保 user_profiles 表有记录，这样推荐算法才能读取到扩展字段
     if data.travel_style is not None or data.city is not None:
-        # 检查是否存在记录
-        cursor.execute("SELECT id FROM user_profiles WHERE user_id = ?", (current_user["id"],))
+        cursor.execute("SELECT user_id FROM user_profiles WHERE user_id = ?", (current_user["id"],))
         existing_profile = cursor.fetchone()
         
         if existing_profile:
@@ -324,11 +323,10 @@ async def update_me(data: UserUpdate, current_user: dict = Depends(get_current_u
                 WHERE user_id = ?
             """, (datetime.now().isoformat(), current_user["id"]))
         else:
-            # 创建新记录（travel_style 和 city 在 users 表中，这里只需要创建空记录）
             cursor.execute("""
-                INSERT INTO user_profiles (user_id, created_at, updated_at)
-                VALUES (?, ?, ?)
-            """, (current_user["id"], datetime.now().isoformat(), datetime.now().isoformat()))
+                INSERT INTO user_profiles (user_id, updated_at)
+                VALUES (?, ?)
+            """, (current_user["id"], datetime.now().isoformat()))
         
         conn.commit()
 

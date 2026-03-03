@@ -26,7 +26,7 @@
 
 ## 📖 Project Introduction
 
-TravelAI is an intelligent recommendation system for ordinary travel users. It integrates **three recommendation algorithms** (collaborative filtering, content-based recommendation, hot/scenario recommendation) and a **large language model AI conversation**, forming a "recommendation + Q&A" dual-engine travel service platform.
+TravelAI is an intelligent recommendation system for travel users. It integrates a **three-route hybrid recommendation engine** (collaborative filtering + content-based recommendation + user-profile reranking), **hot/scenario fallback strategy**, and **LLM-based AI conversation**, forming a complete "recommendation + Q&A + feedback loop" travel service platform.
 
 ### Core Problems Solved by the System
 
@@ -40,22 +40,25 @@ TravelAI is an intelligent recommendation system for ordinary travel users. It i
 
 | Functional Module | Specific Functions | Implementation Status |
 |---------|---------|:-------:|
-| **User Authentication** | Registration, Login (JWT Token), View/Modify personal information | ✅ |
-| **Spot Exploration** | Spot list (pagination + filter by city/type/rating), spot search, spot detail | ✅ |
-| **Collection Management** | Collect/Uncollect spots, view collection list | ✅ |
-| **Spot Reviews** | Users can rate and leave text reviews for spots | ✅ |
-| **Behavior Recording** | Automatically record browse, rate, collect, and search behaviors | ✅ |
-| **Collaborative Filtering** | "Guess you like" based on user similarity | ✅ |
-| **Content Recommendation** | "Similar spot recommendation" based on spot features | ✅ |
-| **Hybrid Recommendation Fusion** | Dynamically weighted fusion of multiple recommendation results | ✅ |
-| **Scenario Recommendation** | 6 scenarios such as family tour/senior tour/historical culture/natural scenery | ✅ |
-| **Hot Recommendation (Fallback)** | Highest-rated spots as a fallback for cold start | ✅ |
-| **AI Smart Conversation** | Chat with LLM, support multi-turn conversation and historical session management | ✅ |
-| **Exclusive AI Guide** | Built-in exclusive AI guide on the spot detail page for an immersive experience | ✅ |
-| **RAG Knowledge Q&A** | Spot knowledge Q&A based on vector retrieval | ✅ |
-| **Smart Search Assistant** | Natural language → Structured conditions → Database query | ✅ |
-| **Intent Recognition** | Rule + LLM double-layer judgment (search/QA/help/chat) | ✅ |
-| **Frontend Interface** | Home recommendation, spot list, spot detail (incl. reviews & AI guide), AI chat, my collections, login/register | ✅ |
+| **User Authentication** | Registration, Login (JWT), get/update profile, profile-completion status check | ✅ |
+| **Profile & Avatar** | Profile page, phone/bio/birthday fields, avatar upload (JPG/PNG ≤ 5MB), static file serving | ✅ |
+| **Spot Exploration** | Spot list (pagination + city/rating filter), spot search, spot detail | ✅ |
+| **Collection Management** | Collect/uncollect spots and view collection list | ✅ |
+| **Spot Reviews** | Users can rate and comment on spots | ✅ |
+| **Behavior Recording** | Automatically record browse/rate/collect/search behaviors | ✅ |
+| **Collaborative Filtering** | "Users similar to you also liked" recommendations | ✅ |
+| **Content-Based Recommendation** | Similar-spot recommendation from feature vectors | ✅ |
+| **User-Profile Reranking** | 0-100 profile match score from city, season, interests, and historical preferences | ✅ |
+| **Three-Route Hybrid Fusion** | Dynamic weighted fusion of CF + CB + Profile with city-priority bonus | ✅ |
+| **Recommendation Feedback Loop** | Exposure/click/collect/rate feedback API for recommendation optimization | ✅ |
+| **Scenario Recommendation** | 6 preset scenarios (family/senior/history/nature/photo/adventure) | ✅ |
+| **Hot Recommendation (Fallback)** | High-rating fallback for sparse or empty candidate sets | ✅ |
+| **AI Smart Conversation** | Multi-turn LLM chat with session history | ✅ |
+| **Exclusive AI Guide** | Spot-specific AI guide drawer on spot detail page | ✅ |
+| **RAG Knowledge Q&A** | Spot knowledge answering based on vector retrieval | ✅ |
+| **Smart Search Assistant** | Natural language → structured conditions → SQL search cards | ✅ |
+| **Intent Recognition** | Rule + LLM two-stage intent classification (search/qa/help/chat) | ✅ |
+| **Frontend Interface** | Home, spot list/detail, AI chat, profile, collections, login/register | ✅ |
 
 ---
 
@@ -277,7 +280,7 @@ To make data available for the recommendation algorithms, the system automatical
 | Embedding Dim | **4096** |
 | Embedding Model| Qwen3-Embedding-8B |
 
-### 4. Database Table Structure (8 Tables)
+### 4. Database Table Structure (10 Tables)
 
 | Table Name | Purpose | Important Fields |
 |------------|---------|------------------|
@@ -289,6 +292,8 @@ To make data available for the recommendation algorithms, the system automatical
 | `spot_features` | Spot feature vectors | spot_id, feature_vector(28-dim), feature_labels |
 | `chat_history` | AI chat history | user_id, role, content, session_id |
 | `spot_comments` | User reviews | user_id, spot_id, rating, content |
+| `user_profiles` | Extended user profile | preferred_season, interest_tags, preferred_budget |
+| `recommend_feedback` | Recommendation feedback events | event_type, event_value, context(JSON) |
 
 ---
 
@@ -334,21 +339,39 @@ Steps:
 
 ### 3. Hybrid Recommendation Fusion (`hybrid_recommender.py`)
 
-**Core Idea**: Dynamic weighted mixing; new users rely on content, old users rely on collaborative filtering.
+**Core Idea**: Three-route dynamic fusion with user-profile reranking and city-priority enhancement.
 
 ```
 Fusion Formula:
-score(u, i) = w_CF × score_CF(u, i) + w_CB × score_CB(u, i)
+score(u, i) = w_CF × score_CF(u, i)
+            + w_CB × score_CB(u, i)
+            + w_Profile × score_Profile(u, i)
+            + city_bonus
+
+Where:
+- score_Profile = match_score / 100.0
+- city_bonus = 0.08 when user's city matches spot city
+- w_CF + w_CB + w_Profile = 1.0
 
 Weight Strategy:
-- New User (< 5 behaviors):   w_CF=0.0,  w_CB=1.0   → Pure Content
-- Growing User (5-20 beh):    w_CF=0→0.4, w_CB=1→0.6 → Progressive mix
-- Active User (> 20 beh):     w_CF=0.6,  w_CB=0.4   → CF mainly
+- New User (< 5 behaviors):   w_CF=0.00, w_CB=0.30, w_Profile=0.70
+- Growing User (5-20 beh):    w_CF grows 0→0.35, w_Profile decreases 0.60→0.25, remainder to w_CB
+- Active User (> 20 beh):     w_CF=0.55, w_CB=0.20, w_Profile=0.25
 
 Fallback Strategy:
-- If hybrid results < N, pad with Hot Recommendation (high-rated spots)
-- Supports 6 scenario recommendations (Family/Senior/History/Scenery/Photo/Adventure)
+- If candidate pool is insufficient, pad with hot recommendations
+- Supports 6 scenario recommendations (Family/Senior/History/Nature/Photo/Adventure)
 ```
+
+### 4. Recommendation Feedback Loop (`/recommend/feedback`)
+
+The frontend reports recommendation events in real time:
+- `exposure`: recommendation card appears in viewport
+- `click`: user clicks a recommendation
+- `collect`: user favorites a recommended spot
+- `rate`: user rates a recommended spot
+
+These events are stored in `recommend_feedback` and can be used to optimize ranking strategy and offline evaluation later.
 
 ---
 
@@ -578,7 +601,9 @@ All interfaces are prefixed with `/api`. Full docs available at `http://localhos
 | POST | `/auth/register` | Register new user | ❌ |
 | POST | `/auth/login` | Login to get Token | ❌ |
 | GET | `/auth/me` | Get current user info | ✅ |
-| PUT | `/auth/me` | Modify personal info | ✅ |
+| PUT | `/auth/me` | Update profile fields | ✅ |
+| GET | `/auth/me/profile-status` | Check profile completeness and first-login state | ✅ |
+| POST | `/auth/avatar` | Upload avatar (JPG/PNG, ≤5MB) | ✅ |
 
 ### Spot Service `/api/spots`
 
@@ -593,11 +618,12 @@ All interfaces are prefixed with `/api`. Full docs available at `http://localhos
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|:----:|
-| GET | `/recommend` | Get personalized recs | ✅ |
-| GET | `/recommend/scene/{scene}` | Scenario recs | ❌ |
+| GET | `/recommend` | Get personalized recommendations (with strategy weights and match score) | ✅ |
+| GET | `/recommend/scene/{scene}` | Scenario recommendations | ❌ |
 | POST | `/recommend/behavior` | Record user behavior | ✅ |
 | GET | `/recommend/collections` | Get user collections | ✅ |
 | POST | `/recommend/collect/{id}` | Collect/Uncollect | ✅ |
+| POST | `/recommend/feedback` | Record recommendation feedback (exposure/click/collect/rate) | ✅ |
 
 ### AI Chat `/api/chat`
 
@@ -645,7 +671,8 @@ xianyu/1/
 │   │   ├── __init__.py
 │   │   ├── collaborative_filter.py # 🤝 CF engine
 │   │   ├── content_based.py        # 📊 Content-based engine
-│   │   └── hybrid_recommender.py   # 🔀 Hybrid fusion engine
+│   │   ├── hybrid_recommender.py   # 🔀 Three-route fusion engine (CF+CB+Profile)
+│   │   └── user_profile_recommender.py # 👤 Profile match scoring engine
 │   │
 │   ├── ai/                  # 🤖 AI Intelligent modules
 │   │   ├── __init__.py
