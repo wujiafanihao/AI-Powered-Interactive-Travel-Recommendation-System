@@ -19,7 +19,7 @@
             <!-- 评分悬浮标签 -->
             <div class="rating-badge">
               <el-icon><StarFilled /></el-icon>
-              <span class="rating-number">{{ spot.rating || '暂无' }}</span>
+              <span class="rating-number">{{ typeof spot.rating === 'number' ? spot.rating.toFixed(1) : spot.rating }}</span>
             </div>
           </div>
         </el-card>

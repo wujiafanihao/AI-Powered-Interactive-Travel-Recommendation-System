@@ -101,7 +101,7 @@
                       <h4 class="spot-mini-name" :title="spot.name">{{ spot.name }}</h4>
                       <div class="spot-mini-meta">
                         <span class="city"><el-icon><Location /></el-icon> {{ spot.city }}</span>
-                        <span class="rating"><el-icon><StarFilled /></el-icon> {{ spot.rating }}</span>
+                        <span class="rating"><el-icon><StarFilled /></el-icon> {{ typeof spot.rating === 'number' ? spot.rating.toFixed(1) : spot.rating }}</span>
                       </div>
                     </div>
                   </el-card>
