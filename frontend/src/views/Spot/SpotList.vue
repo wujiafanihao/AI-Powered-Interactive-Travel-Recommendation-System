@@ -69,6 +69,18 @@
           </el-button>
         </el-form-item>
       </el-form>
+      
+      <!-- 个性化推荐 Tab（仅登录用户可见） -->
+      <div class="recommend-tab" v-if="userStore.token">
+        <el-tabs v-model="activeTab" @tab-click="handleTabClick">
+          <el-tab-pane label="全部景点" name="all">
+            <span class="tab-desc">浏览所有景点，支持筛选和搜索</span>
+          </el-tab-pane>
+          <el-tab-pane label="为你推荐" name="recommend">
+            <span class="tab-desc">基于您的城市、偏好和行为智能推荐</span>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
     </el-card>
 
     <!-- 统计信息栏 -->
@@ -154,6 +166,25 @@
         class="custom-pagination"
       />
     </div>
+
+    <!-- 列表页 AI 客服入口 -->
+    <div class="list-ai-fab" @click="toggleAssistant">
+      <el-tooltip content="AI 帮你找景点" placement="left">
+        <div class="fab-button" :class="{ active: assistantVisible }">
+          <el-icon><Headset /></el-icon>
+        </div>
+      </el-tooltip>
+    </div>
+
+    <!-- 复用型 AI 客服抽屉 -->
+    <SpotAssistantDrawer
+      v-model="assistantVisible"
+      mode="search"
+      title="🤖 景点帮搜助手"
+      welcome-message="你好！我是景点帮搜助手。告诉我你想去哪、和谁去、预算和季节，我会直接给你推荐卡片。"
+      input-placeholder="例如：成都适合亲子游、交通方便的景点"
+      @recommend-event="handleAssistantRecommendEvent"
+    />
   </div>
 </template>
 
@@ -162,18 +193,22 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 // 引入路由，用于页面跳转
 import { useRouter } from 'vue-router'
+// 引入用户状态管理
+import { useUserStore } from '../../store/user'
 // 引入 Element Plus 的消息提示
 import { ElMessage } from 'element-plus'
 // 引入 Element Plus 的图标
-import { 
-  Location, Search, RefreshLeft, ArrowRight, 
-  StarFilled, Position, TrendCharts 
+import {
+  Location, Search, RefreshLeft, ArrowRight,
+  StarFilled, Position, TrendCharts, Headset
 } from '@element-plus/icons-vue'
 // 引入 API 接口
-import { getCities, getSpots, searchSpots as apiSearchSpots } from '../../api/spots'
+import { getCities, getSpots, searchSpots as apiSearchSpots, recordRecommendFeedback, getRecommendations } from '../../api/spots'
+import SpotAssistantDrawer from '../../components/SpotAssistantDrawer.vue'
 
 // 获取路由实例
 const router = useRouter()
+const userStore = useUserStore()
 
 // 状态定义
 const loading = ref(false)
@@ -182,6 +217,37 @@ const cities = ref<string[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(12)
+const assistantVisible = ref(false)
+const activeTab = ref('all')
+const recommendLoading = ref(false)
+
+// Tab 切换处理
+const handleTabClick = (tab: any) => {
+  if (tab.props.name === 'recommend') {
+    loadRecommendations()
+  } else {
+    fetchSpots()
+  }
+}
+
+// 加载个性化推荐
+const loadRecommendations = async () => {
+  if (!userStore.token) return
+  
+  recommendLoading.value = true
+  loading.value = true
+  try {
+    const res = await getRecommendations(50)
+    spots.value = res.items || []
+    total.value = spots.value.length
+  } catch (error) {
+    console.error('加载推荐失败:', error)
+    ElMessage.error('加载推荐失败')
+  } finally {
+    loading.value = false
+    recommendLoading.value = false
+  }
+}
 
 // 筛选条件
 const filters = reactive({
@@ -272,6 +338,24 @@ const handleCurrentChange = (val: number) => {
 // 跳转到景点详情页
 const goToDetail = (id: number) => {
   router.push(`/spot/${id}`)
+}
+
+// 切换列表页 AI 助手抽屉
+const toggleAssistant = () => {
+  assistantVisible.value = !assistantVisible.value
+}
+
+const handleAssistantRecommendEvent = (payload: {
+  spot_id: number
+  event_type: 'exposure' | 'click'
+  source?: string
+}) => {
+  const token = userStore.token || localStorage.getItem('token')
+  if (!token) return
+
+  recordRecommendFeedback(payload).catch((error) => {
+    console.error('上报推荐反馈失败:', error)
+  })
 }
 
 // 清理图片 URL 的函数，去除反引号和空格
@@ -585,6 +669,40 @@ onMounted(() => {
   padding: 60px 0;
 }
 
+/* 列表页 AI 悬浮按钮 */
+.list-ai-fab {
+  position: fixed;
+  right: 36px;
+  bottom: 96px;
+  z-index: 110;
+  cursor: pointer;
+  animation: float 3s ease-in-out infinite;
+}
+
+.fab-button {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #409eff 0%, #79bbff 100%);
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 28px;
+  box-shadow: 0 6px 20px rgba(64, 158, 255, 0.38);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fab-button:hover {
+  transform: scale(1.12);
+  box-shadow: 0 8px 26px rgba(64, 158, 255, 0.5);
+}
+
+.fab-button.active {
+  background: linear-gradient(135deg, #909399 0%, #a6a9ad 100%);
+  box-shadow: 0 6px 20px rgba(144, 147, 153, 0.38);
+}
+
 /* 动画定义 */
 @keyframes fadeIn {
   from {
@@ -615,5 +733,35 @@ onMounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* 推荐 Tab 样式 */
+.recommend-tab {
+  margin-top: 20px;
+  border-top: 1px solid #ebeef5;
+  padding-top: 20px;
+}
+
+.tab-desc {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+:deep(.el-tabs__item) {
+  font-size: 16px;
+}
+
+:deep(.el-tabs__content) {
+  display: none;
 }
 </style>

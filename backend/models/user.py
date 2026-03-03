@@ -7,9 +7,13 @@ Pydantic 数据模型 - 用户相关
     确保前端传过来的数据是合法的。
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, constr
+from typing import Optional, Literal
 from datetime import datetime
+
+
+# 严格手机号：必须是 1 开头的 11 位数字，且不做类型宽松转换
+PhoneStr = constr(strict=True, pattern=r"^1\d{10}$")
 
 
 # ==================== 请求模型 ====================
@@ -39,6 +43,10 @@ class UserUpdate(BaseModel):
     city: Optional[str] = None
     travel_style: Optional[list[str]] = None
     accessibility: Optional[str] = None
+    phone: Optional[PhoneStr] = None
+    bio: Optional[str] = Field(None, max_length=500)
+    birthday: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 # ==================== 响应模型 ====================
@@ -53,6 +61,10 @@ class UserResponse(BaseModel):
     city: Optional[str] = None
     travel_style: Optional[list[str]] = None
     accessibility: str = "normal"
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    birthday: Optional[str] = None
+    avatar_url: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -91,3 +103,12 @@ class RecommendRequest(BaseModel):
     """推荐请求"""
     n: int = Field(10, ge=1, le=50, description="推荐数量")
     scene: Optional[str] = Field(None, description="场景标签")
+
+
+class RecommendFeedbackEvent(BaseModel):
+    """推荐反馈事件请求"""
+    spot_id: int = Field(..., description="景点ID")
+    event_type: Literal["exposure", "click", "collect", "rate"] = Field(..., description="事件类型")
+    rec_session_id: Optional[str] = Field(None, max_length=64, description="推荐会话ID")
+    source: Optional[str] = Field(None, max_length=32, description="推荐来源")
+    score: Optional[float] = Field(None, ge=0.0, le=1.0, description="推荐分")

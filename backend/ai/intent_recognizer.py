@@ -30,11 +30,13 @@ try:
     from ai.llm_client import get_llm_client
     from ai.rag_engine import get_rag_engine
     from database import DB_PATH
+    from algorithms.user_profile_recommender import UserProfileRecommender
 except ImportError:
     from llm_client import get_llm_client
     from rag_engine import get_rag_engine
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from database import DB_PATH
+    from algorithms.user_profile_recommender import UserProfileRecommender
 
 settings = get_settings()
 
@@ -282,11 +284,11 @@ class SmartSearcher:
         params.append(limit)
 
         sql = f"""
-            SELECT id, name, city, rating, image_url, spot_type, 
-                   target_group, suggest_time, open_time, address
+            SELECT id, name, city, rating, image_url, spot_type,
+                   target_group, suggest_time, open_time, address, description, tips
             FROM spots
             WHERE {where_clause}
-            ORDER BY 
+            ORDER BY
                 CASE WHEN rating IS NOT NULL THEN 0 ELSE 1 END,
                 rating DESC
             LIMIT ?
@@ -299,6 +301,7 @@ class SmartSearcher:
         results = []
         for row in rows:
             results.append({
+                "id": row[0],
                 "spot_id": row[0],
                 "name": row[1],
                 "city": row[2],
@@ -309,9 +312,68 @@ class SmartSearcher:
                 "suggest_time": row[7],
                 "open_time": row[8],
                 "address": row[9],
+                "description": row[10],
+                "tips": row[11],
             })
 
         return results
+
+
+def _extract_tags(spot: dict) -> list[str]:
+    """从景点信息中提取 1-3 个标签。"""
+    tags = []
+
+    for field in ["spot_type", "target_group"]:
+        raw = spot.get(field)
+        if not raw:
+            continue
+
+        values = []
+        if isinstance(raw, list):
+            values = [str(v).strip() for v in raw if str(v).strip()]
+        else:
+            text = str(raw).strip()
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    values = [str(v).strip() for v in parsed if str(v).strip()]
+                elif isinstance(parsed, str):
+                    values = [parsed.strip()]
+            except (json.JSONDecodeError, TypeError):
+                for sep in ["、", "，", ",", "/", "|", " "]:
+                    text = text.replace(sep, ",")
+                values = [v.strip() for v in text.split(",") if v.strip()]
+
+        for v in values:
+            if v and v not in tags:
+                tags.append(v)
+
+    return tags[:3] if tags else ["精选推荐"]
+
+
+def _to_card_spot(spot: dict) -> dict:
+    """把搜索结果统一成前端卡片结构。"""
+    spot_id = spot.get("id") or spot.get("spot_id")
+    name = (spot.get("name") or "未知景点").strip()
+
+    brief_source = (
+        spot.get("description")
+        or spot.get("tips")
+        or spot.get("open_time")
+        or ""
+    )
+    brief = str(brief_source).strip().replace("\n", " ")
+
+    return {
+        "id": spot_id,
+        "spot_id": spot_id,
+        "name": name[:18],
+        "brief": brief[:50],
+        "tags": _extract_tags(spot),
+        "image_url": spot.get("image_url") or "",
+        "city": spot.get("city") or "",
+        "rating": spot.get("rating"),
+    }
 
 
 class ChatService:
@@ -327,6 +389,7 @@ class ChatService:
     def __init__(self):
         self.intent_recognizer = IntentRecognizer()
         self.smart_searcher = SmartSearcher()
+        self.profile_engine = UserProfileRecommender(DB_PATH)
         self.rag_engine = None  # 延迟初始化（因为可能向量库还没建好）
 
     def _get_rag(self):
@@ -366,7 +429,7 @@ class ChatService:
 
         # 第二步：根据意图分发处理
         if intent == INTENT_SEARCH:
-            return await self._handle_search(user_message)
+            return await self._handle_search(user_message, user_id=user_id)
         elif intent == INTENT_QA:
             return await self._handle_qa(user_message, history)
         elif intent == INTENT_HELP:
@@ -376,7 +439,7 @@ class ChatService:
         else:
             return await self._handle_qa(user_message, history)
 
-    async def _handle_search(self, user_message: str) -> dict:
+    async def _handle_search(self, user_message: str, user_id: int = None) -> dict:
         """
         处理搜索意图
 
@@ -392,13 +455,34 @@ class ChatService:
             conditions = {}
         
         # 搜索景点
-        spots = self.smart_searcher.search_spots(conditions, limit=10)
+        spots = self.smart_searcher.search_spots(conditions, limit=12)
         print(f"🔍 搜索到 {len(spots)} 个景点")
 
-        # 让AI生成一段推荐语（如果失败则用简单回复）
-        if spots:
+        # 如果有用户ID，按画像匹配分重排
+        if user_id and spots:
             try:
-                spot_names = [f"{s['name']}({s['city']})" for s in spots[:5]]
+                spot_ids = [s["spot_id"] for s in spots]
+                score_map = self.profile_engine.calculate_batch_scores(user_id, spot_ids)
+                spots.sort(key=lambda s: score_map.get(s["spot_id"], 0.0), reverse=True)
+                for s in spots:
+                    s["match_score"] = score_map.get(s["spot_id"], 0.0)
+            except Exception as e:
+                print(f"⚠️ 画像重排失败，降级为原始排序: {e}")
+
+        # 标准化卡片：3-5 条
+        if len(spots) >= 5:
+            card_spots = spots[:5]
+        elif len(spots) >= 3:
+            card_spots = spots[:3]
+        else:
+            card_spots = spots
+
+        card_spots = [_to_card_spot(s) for s in card_spots]
+
+        # 让AI生成一段推荐语（如果失败则用简单回复）
+        if card_spots:
+            try:
+                spot_names = [f"{s['name']}({s['city']})" for s in card_spots[:5]]
                 llm = get_llm_client()
                 reply = await llm.chat(
                     f"用户想找：{user_message}\n我搜到了这些景点：{', '.join(spot_names)}\n"
@@ -407,12 +491,12 @@ class ChatService:
                 )
             except Exception as e:
                 print(f"⚠️ AI推荐语生成失败，使用简单回复: {e}")
-                reply = f"太好了！我为你找到了 {len(spots)} 个不错的景点～ 你可以看看下面的卡片，有感兴趣的就点进去了解详情吧！🗺️"
+                reply = f"太好了！我为你找到了 {len(card_spots)} 个不错的景点～ 你可以看看下面的卡片，有感兴趣的就点进去了解详情吧！🗺️"
             
             return {
                 "reply": reply,
                 "intent": INTENT_SEARCH,
-                "spots": spots,
+                "spots": card_spots,
                 "conditions": conditions,
             }
         else:

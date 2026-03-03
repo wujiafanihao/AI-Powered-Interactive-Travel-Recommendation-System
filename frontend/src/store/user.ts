@@ -22,6 +22,13 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem('user', JSON.stringify(info))
   }
 
+  // 合并更新用户信息（常用于局部更新头像、昵称等）
+  const patchUserInfo = (patch: any) => {
+    const merged = { ...(userInfo.value || {}), ...(patch || {}) }
+    userInfo.value = merged
+    localStorage.setItem('user', JSON.stringify(merged))
+  }
+
   // 退出登录函数，清空 token 和用户信息，同时删除本地存储
   const logout = () => {
     token.value = ''
@@ -36,6 +43,7 @@ export const useUserStore = defineStore('user', () => {
     userInfo,
     setToken,
     setUserInfo,
+    patchUserInfo,
     logout
   }
 })

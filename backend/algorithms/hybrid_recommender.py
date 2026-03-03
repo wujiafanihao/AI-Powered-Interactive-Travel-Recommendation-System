@@ -26,10 +26,12 @@ try:
     # 作为包的一部分导入（FastAPI 运行时）
     from algorithms.collaborative_filter import CollaborativeFilter
     from algorithms.content_based import ContentBasedRecommender
+    from algorithms.user_profile_recommender import UserProfileRecommender
 except ImportError:
     # 直接运行脚本时
     from collaborative_filter import CollaborativeFilter
     from content_based import ContentBasedRecommender
+    from user_profile_recommender import UserProfileRecommender
 
 
 class HybridRecommender:
@@ -55,6 +57,8 @@ class HybridRecommender:
         self.cf_engine = CollaborativeFilter(db_path)
         # 右手：内容推荐引擎
         self.cb_engine = ContentBasedRecommender(db_path)
+        # 第三路：用户画像重排序引擎
+        self.profile_engine = UserProfileRecommender(db_path)
 
         # 标记是否已经初始化过
         self._initialized = False
@@ -94,21 +98,21 @@ class HybridRecommender:
         self._initialized = True
         print("✅ 混合推荐引擎初始化完成")
 
-    def _calculate_weights(self, user_id: int) -> tuple[float, float]:
+    def _calculate_weights(self, user_id: int) -> tuple[float, float, float]:
         """
         根据用户数据丰富度动态计算权重
 
         大白话说明：
-            用户行为数据越多，协同过滤就越准，权重就越高。
-            反之，用户行为少的时候，主要靠内容推荐。
+            在原来的 CF + CB 两路基础上，加入用户画像重排序（Profile）权重。
+            三路权重始终满足：w_cf + w_cb + w_profile = 1.0
 
             具体规则：
-            - 行为 < 5条：w_CF=0.0, w_CB=1.0（纯内容推荐）
-            - 行为 5-20条：w_CF 从0逐渐增长到0.4，w_CB 从1逐渐下降到0.6
-            - 行为 > 20条：w_CF=0.6, w_CB=0.4（协同过滤为主）
+            - 行为 < 5条：w_cf=0.0,  w_cb=0.75, w_profile=0.25
+            - 行为 5-20条：w_cf 从0增长到0.35，w_profile 固定0.25，剩余给 w_cb
+            - 行为 > 20条：w_cf=0.55, w_cb=0.20, w_profile=0.25
 
         返回：
-            (协同过滤权重, 内容推荐权重)
+            (协同过滤权重, 内容推荐权重, 画像权重)
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -116,25 +120,23 @@ class HybridRecommender:
         # 统计用户行为数量
         cursor.execute(
             "SELECT COUNT(*) FROM user_behaviors WHERE user_id = ?",
-            (user_id,)
+            (user_id,),
         )
         behavior_count = cursor.fetchone()[0]
         conn.close()
 
-        if behavior_count < 5:
-            # 冷启动阶段：完全依赖内容推荐
-            w_cf, w_cb = 0.0, 1.0
-        elif behavior_count < 20:
-            # 数据积累阶段：渐进式混合
-            # 行为数从5增长到20时，CF权重从0线性增长到0.4
-            ratio = (behavior_count - 5) / 15.0  # 0.0 ~ 1.0
-            w_cf = 0.4 * ratio
-            w_cb = 1.0 - w_cf
-        else:
-            # 数据充足阶段：协同过滤为主
-            w_cf, w_cb = 0.6, 0.4
+        w_profile = 0.25
 
-        return w_cf, w_cb
+        if behavior_count < 5:
+            w_cf, w_cb = 0.0, 0.75
+        elif behavior_count < 20:
+            ratio = (behavior_count - 5) / 15.0  # 0.0 ~ 1.0
+            w_cf = 0.35 * ratio
+            w_cb = 1.0 - w_profile - w_cf
+        else:
+            w_cf, w_cb = 0.55, 0.20
+
+        return w_cf, w_cb, w_profile
 
     def _get_hot_recommendations(self, n: int = 10, exclude_ids: set = None) -> list[dict]:
         """
@@ -322,7 +324,7 @@ class HybridRecommender:
             return self._get_scene_recommendations(scene, n)
 
         # 计算动态权重
-        w_cf, w_cb = self._calculate_weights(user_id)
+        w_cf, w_cb, w_profile = self._calculate_weights(user_id)
 
         # --------- 获取两个引擎的推荐结果 ---------
 
@@ -348,13 +350,23 @@ class HybridRecommender:
                     "reason": rec["reason"],
                 }
 
-        # --------- 融合两个结果 ---------
-        # 取两个结果的并集
+        # --------- 融合三路结果（CF + CB + Profile）---------
+        # 取 CF 和 CB 的并集作为候选池
         all_spot_ids = set(cf_results.keys()) | set(cb_results.keys())
 
         if not all_spot_ids:
             # 两个引擎都没结果（冷启动），用热门推荐兜底
-            return self._get_hot_recommendations(n)
+            hot_only = self._get_hot_recommendations(n)
+            for item in hot_only:
+                item["match_score"] = 0.0
+                item["profile_score"] = 0.0
+                item["w_cf"] = w_cf
+                item["w_cb"] = w_cb
+                item["w_profile"] = w_profile
+            return hot_only
+
+        # 为候选池批量计算画像匹配分（0-100）
+        profile_scores = self.profile_engine.calculate_batch_scores(user_id, all_spot_ids)
 
         # 计算每个景点的融合分数
         merged_results = []
@@ -362,10 +374,12 @@ class HybridRecommender:
             cf_item = cf_results.get(spot_id)
             cb_item = cb_results.get(spot_id)
 
-            # 融合分数
+            # 三路分数
             cf_score = cf_item["score"] if cf_item else 0.0
             cb_score = cb_item["score"] if cb_item else 0.0
-            hybrid_score = w_cf * cf_score + w_cb * cb_score
+            match_score = profile_scores.get(spot_id, 0.0)
+            profile_score = match_score / 100.0
+            hybrid_score = w_cf * cf_score + w_cb * cb_score + w_profile * profile_score
 
             # 融合推荐理由
             reasons = []
@@ -373,12 +387,16 @@ class HybridRecommender:
 
             if cf_item and w_cf > 0:
                 reasons.append(cf_item["reason"])
-                if not cb_item:
+                if not cb_item and match_score <= 0:
                     source = "cf"
             if cb_item and w_cb > 0:
                 reasons.append(cb_item["reason"])
-                if not cf_item:
+                if not cf_item and match_score <= 0:
                     source = "cb"
+            if match_score > 0:
+                reasons.append(f"画像匹配度 {int(round(match_score))}%")
+                if not cf_item and not cb_item:
+                    source = "profile"
 
             # 合并去重理由
             reason_text = "；".join(dict.fromkeys(reasons))  # 去重保序
@@ -390,8 +408,11 @@ class HybridRecommender:
                 "source": source,
                 "cf_score": round(cf_score, 4),
                 "cb_score": round(cb_score, 4),
+                "profile_score": round(profile_score, 4),
+                "match_score": round(match_score, 2),
                 "w_cf": w_cf,
                 "w_cb": w_cb,
+                "w_profile": w_profile,
             })
 
         # 按融合分数排序
@@ -478,21 +499,33 @@ class HybridRecommender:
                 "score": rec["score"],
                 "reason": rec["reason"],
                 "source": rec["source"],
+                "match_score": rec.get("match_score", 0.0),
+                "w_cf": rec.get("w_cf", 0.0),
+                "w_cb": rec.get("w_cb", 0.0),
+                "w_profile": rec.get("w_profile", 0.0),
             })
 
         # 计算权重信息
-        w_cf, w_cb = self._calculate_weights(user_id)
+        w_cf, w_cb, w_profile = self._calculate_weights(user_id)
+        avg_match_score = 0.0
+        if recommendations:
+            avg_match_score = round(
+                sum(r.get("match_score", 0.0) for r in recommendations) / len(recommendations),
+                2,
+            )
 
         return {
             "items": items,
             "strategy": {
                 "w_cf": w_cf,
                 "w_cb": w_cb,
-                "description": self._describe_strategy(w_cf, w_cb),
+                "w_profile": w_profile,
+                "avg_match_score": avg_match_score,
+                "description": self._describe_strategy(w_cf, w_cb, w_profile),
             },
         }
 
-    def _describe_strategy(self, w_cf: float, w_cb: float) -> str:
+    def _describe_strategy(self, w_cf: float, w_cb: float, w_profile: float) -> str:
         """
         用文字描述当前使用的推荐策略
 
@@ -500,11 +533,11 @@ class HybridRecommender:
             告诉前端/用户现在用的是什么推荐策略，方便理解和调试。
         """
         if w_cf == 0:
-            return "冷启动模式：基于您的偏好设置进行推荐，随着使用越多推荐越精准"
+            return "冷启动模式：内容偏好 + 用户画像联合推荐"
         elif w_cf < 0.4:
-            return "成长模式：正在学习您的品味，推荐会越来越准"
+            return "成长模式：协同过滤 + 内容偏好 + 用户画像三路融合"
         else:
-            return "成熟模式：综合分析您的历史偏好和相似用户的喜好进行推荐"
+            return "成熟模式：历史行为协同 + 内容偏好 + 用户画像综合推荐"
 
 
 if __name__ == "__main__":

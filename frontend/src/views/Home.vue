@@ -37,6 +37,8 @@
             <!-- 下拉菜单内容 -->
             <template #dropdown>
               <el-dropdown-menu>
+                <!-- 个人资料菜单项 -->
+                <el-dropdown-item @click="$router.push('/profile')"><el-icon><User /></el-icon> 个人资料</el-dropdown-item>
                 <!-- 我的收藏菜单项 -->
                 <el-dropdown-item @click="$router.push('/collections')"><el-icon><Star /></el-icon> 我的收藏</el-dropdown-item>
                 <!-- 退出登录菜单项，divided 属性表示有分隔线 -->
@@ -93,7 +95,7 @@
               <div class="spot-scroll-container" v-loading="sceneLoading">
                 <div class="spot-scroll-list">
                   <!-- 遍历该场景下的景点，生成卡片 -->
-                  <el-card v-for="spot in sceneSpots" :key="spot.id" class="spot-mini-card" shadow="hover" @click="goToSpot(spot.spot_id || spot.id)">
+                  <el-card v-for="spot in sceneSpots" :key="spot.id" class="spot-mini-card" shadow="hover" @click="goToSpot(spot.spot_id || spot.id, spot)">
                     <!-- 景点图片 -->
                     <img :src="spot.image_url || 'https://via.placeholder.com/200x150?text=暂无图片'" class="spot-mini-img" />
                     <!-- 景点信息 -->
@@ -126,7 +128,7 @@
             <el-row :gutter="20" v-if="recommendations.length > 0">
               <!-- 遍历推荐结果，生成卡片 -->
               <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="(item, index) in recommendations" :key="index" class="recommend-col">
-                <el-card class="recommend-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(item.spot_id)">
+                <el-card class="recommend-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(item.spot_id, item)">
                   <!-- 推荐算法标签，悬浮在卡片左上角 -->
                   <div class="recommend-badge" :class="item.source || item.algorithm">{{ getAlgorithmName(item.source || item.algorithm) }}</div>
                   <!-- 景点图片 -->
@@ -139,6 +141,9 @@
                       <el-tag size="small" type="info">{{ item.city || '未知城市' }}</el-tag>
                       <!-- 推荐度分数 -->
                       <span class="score-text">推荐度: {{(item.score * 100).toFixed(0)}}%</span>
+                    </div>
+                    <div class="match-score" v-if="typeof item.match_score === 'number'">
+                      匹配分：{{ item.match_score.toFixed(0) }}%
                     </div>
                     <!-- 推荐理由 -->
                     <p class="recommend-desc">{{ getRecommendReason(item) }}</p>
@@ -163,6 +168,50 @@
         </div>
       </el-main>
     </el-container>
+
+    <!-- 首次登录引导弹窗 -->
+    <el-dialog
+      v-model="profileDialogVisible"
+      title="🎉 完善资料，开启智能推荐"
+      width="500px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div class="profile-dialog-content">
+        <div class="dialog-header">
+          <el-icon :size="48" color="#409EFF"><Present /></el-icon>
+          <h3>欢迎使用 TravelAI！</h3>
+        </div>
+        <p class="dialog-text">
+          告诉我们您的基本信息，我们将根据您的<strong>所在城市</strong>、<strong>旅行偏好</strong>等，
+          为您推荐最适合的景点！
+        </p>
+        <div class="dialog-tips">
+          <el-alert
+            title="完善资料后，您将获得："
+            type="info"
+            :closable="false"
+            show-icon
+          >
+            <template #default>
+              <ul class="tip-list">
+                <li>📍 <strong>同城推荐</strong>：优先推荐您所在城市的景点</li>
+                <li>🎯 <strong>精准匹配</strong>：根据您的旅行偏好推荐</li>
+                <li>🌸 <strong>季节推荐</strong>：推荐适合当前季节的景点</li>
+                <li>👥 <strong>相似用户</strong>：品味相似的用户喜欢的景点</li>
+              </ul>
+            </template>
+          </el-alert>
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="goToProfile">去完善资料</el-button>
+          <el-button type="primary" @click="closeProfileDialog">先逛逛</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -187,7 +236,7 @@ const components = {
   Present, Sunset, MostlyCloudy, Camera, MapLocation, Bicycle
 }
 // 引入推荐相关的 API 接口
-import { getSceneRecommendations, getRecommendations } from '../api/spots'
+import { getSceneRecommendations, getRecommendations, recordRecommendFeedback, getProfileStatus } from '../api/spots'
 // 引入用户状态管理
 import { useUserStore } from '../store/user'
 
@@ -195,6 +244,40 @@ import { useUserStore } from '../store/user'
 const router = useRouter()
 // 获取用户状态管理实例
 const userStore = useUserStore()
+
+// 首次登录引导弹窗
+const profileDialogVisible = ref(false)
+
+// 去完善资料
+const goToProfile = () => {
+  profileDialogVisible.value = false
+  router.push('/profile')
+}
+
+// 关闭弹窗
+const closeProfileDialog = () => {
+  profileDialogVisible.value = false
+  // 标记用户已看过弹窗（使用 sessionStorage）
+  sessionStorage.setItem('hasSeenProfileDialog', 'true')
+}
+
+// 检查是否需要显示引导弹窗
+const checkProfileDialog = async () => {
+  if (!userStore.token) return
+  
+  // 如果已经看过弹窗，不再显示
+  if (sessionStorage.getItem('hasSeenProfileDialog') === 'true') return
+  
+  try {
+    const status = await getProfileStatus()
+    // 如果是首次登录且资料不完善，显示弹窗
+    if (status.is_first_login && !status.is_complete) {
+      profileDialogVisible.value = true
+    }
+  } catch (error) {
+    console.error('检查资料状态失败:', error)
+  }
+}
 
 // 定义场景列表，每个场景有名称和对应的图标
 const scenes = [
@@ -242,7 +325,25 @@ const loadRecommendations = async () => {
   try {
     // 调用 API 获取个性化推荐，默认返回 8 个景点
     const res = await getRecommendations(8)
-    recommendations.value = res.items || res
+    const items = res.items || res
+    recommendations.value = items
+
+    // 上报曝光反馈（同一轮推荐去重）
+    const exposed = new Set<number>()
+    for (const item of items) {
+      const spotId = Number(item?.spot_id || item?.id || 0)
+      if (!spotId || exposed.has(spotId)) continue
+      exposed.add(spotId)
+
+      recordRecommendFeedback({
+        spot_id: spotId,
+        event_type: 'exposure',
+        source: item?.source || item?.algorithm,
+        score: typeof item?.score === 'number' ? item.score : undefined
+      }).catch((error) => {
+        console.error('上报推荐曝光失败:', error)
+      })
+    }
   } catch (error) {
     console.error('加载个性化推荐失败:', error)
   } finally {
@@ -257,8 +358,21 @@ const handleSceneClick = (tab: any) => {
 }
 
 // 跳转到景点详情页的函数
-const goToSpot = (id: number) => {
-  if (id) router.push(`/spot/${id}`)
+const goToSpot = (id: number, item?: any) => {
+  if (!id) return
+
+  if (userStore.token && item?.spot_id) {
+    recordRecommendFeedback({
+      spot_id: item.spot_id,
+      event_type: 'click',
+      source: item.source || item.algorithm,
+      score: typeof item.score === 'number' ? item.score : undefined
+    }).catch((e) => {
+      console.error('上报推荐点击失败:', e)
+    })
+  }
+
+  router.push(`/spot/${id}`)
 }
 
 // 退出登录的函数
@@ -278,7 +392,9 @@ const getAlgorithmName = (algo: string) => {
     'hot': '热门推荐',
     'scene': '场景匹配',
     'cb': '猜你喜欢',
-    'cf': '相似用户'
+    'cf': '相似用户',
+    'profile': '画像匹配',
+    'hybrid': '综合推荐'
   }
   return map[algo] || '推荐'
 }
@@ -296,9 +412,10 @@ const getRecommendReason = (item: any) => {
 onMounted(() => {
   // 加载当前激活场景的推荐
   loadSceneSpots(activeScene.value)
-  // 如果已登录，加载个性化推荐
+  // 如果已登录，加载个性化推荐并检查资料
   if (userStore.token) {
     loadRecommendations()
+    checkProfileDialog()
   }
 })
 </script>
@@ -626,10 +743,63 @@ onMounted(() => {
   border-radius: 4px;
 }
 
+.match-score {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 600;
+}
+
 /* 未登录提示区样式 */
 .login-prompt {
   background: white;
   border-radius: 12px;
   padding: 20px;
+}
+
+/* 首次登录引导弹窗样式 */
+.profile-dialog-content {
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.dialog-header {
+  margin-bottom: 20px;
+}
+
+.dialog-header h3 {
+  margin-top: 10px;
+  font-size: 20px;
+  color: #303133;
+}
+
+.dialog-text {
+  font-size: 14px;
+  color: #606266;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.dialog-tips {
+  text-align: left;
+  margin-top: 20px;
+}
+
+.tip-list {
+  margin: 10px 0 0 0;
+  padding-left: 20px;
+  list-style: none;
+}
+
+.tip-list li {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
 }
 </style>

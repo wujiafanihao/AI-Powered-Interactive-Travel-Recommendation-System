@@ -6,14 +6,7 @@ TravelAI 数据库初始化模块
     1. 创建 SQLite 数据库和所有需要的表（如果还没创建的话）
     2. 提供一个"获取数据库连接"的函数，供其他模块调用
 
-    数据库一共有 7 张表：
-    - users: 存用户信息（用户名、密码、年龄、性别、旅行偏好等）
-    - spots: 存景点信息（名称、城市、地址、介绍、评分等）
-    - user_behaviors: 存用户行为记录（谁浏览了哪个景点、打了几分等）
-    - user_collections: 存用户收藏（谁收藏了哪个景点）
-    - user_similarity: 存用户之间的相似度（协同过滤算法用的）
-    - spot_features: 存景点的特征向量（内容推荐算法用的）
-    - chat_history: 存 AI 对话记录
+    数据库包含多张业务表（当前为 10 张），覆盖用户、景点、行为、收藏、推荐反馈、评论和对话等核心数据。
 """
 
 import os
@@ -30,7 +23,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), settings.DATABASE_PATH)
 
 
 # ============================================
-# 建表 SQL 语句（共 7 张表）
+# 建表 SQL 语句（当前共 10 张表）
 # ============================================
 
 # 所有建表语句放在一个列表里，方便一次性执行
@@ -231,7 +224,7 @@ CREATE_INDEXES_SQL = [
 
 def ensure_schema_upgrades(conn: sqlite3.Connection):
     """
-    旧库升级保护：确保 users 表补齐新字段。
+    旧库升级保护（同步版）：确保 users 表补齐新字段。
 
     大白话说明：
         老数据库如果是在新增字段之前创建的，users 表里会缺列。
@@ -253,6 +246,31 @@ def ensure_schema_upgrades(conn: sqlite3.Connection):
     for column_name, alter_sql in required_columns.items():
         if column_name not in existing_columns:
             cursor.execute(alter_sql)
+
+
+async def ensure_schema_upgrades_async(db: aiosqlite.Connection):
+    """
+    旧库升级保护（异步版）：可靠地用 async SQL 补齐 users 新字段。
+
+    大白话说明：
+        只使用 aiosqlite 的公开异步接口：
+        execute -> fetchall -> 按需执行 ALTER。
+        不依赖私有属性，也不混用同步连接对象。
+    """
+    cursor = await db.execute("PRAGMA table_info(users);")
+    rows = await cursor.fetchall()
+    existing_columns = {row[1] for row in rows}
+
+    required_columns = {
+        "phone": "ALTER TABLE users ADD COLUMN phone TEXT;",
+        "bio": "ALTER TABLE users ADD COLUMN bio TEXT;",
+        "avatar_url": "ALTER TABLE users ADD COLUMN avatar_url TEXT;",
+        "birthday": "ALTER TABLE users ADD COLUMN birthday TEXT;",
+    }
+
+    for column_name, alter_sql in required_columns.items():
+        if column_name not in existing_columns:
+            await db.execute(alter_sql)
 
 
 def init_db_sync():
@@ -314,22 +332,7 @@ async def init_db_async():
             await db.execute(sql)
 
         # 老库补丁：补齐 users 新字段（异步版本）
-        cursor = await db.execute("PRAGMA table_info(users);")
-        rows = await cursor.fetchall()
-        existing_columns = {
-            row[1] for row in rows
-        }
-
-        required_columns = {
-            "phone": "ALTER TABLE users ADD COLUMN phone TEXT;",
-            "bio": "ALTER TABLE users ADD COLUMN bio TEXT;",
-            "avatar_url": "ALTER TABLE users ADD COLUMN avatar_url TEXT;",
-            "birthday": "ALTER TABLE users ADD COLUMN birthday TEXT;",
-        }
-
-        for column_name, alter_sql in required_columns.items():
-            if column_name not in existing_columns:
-                await db.execute(alter_sql)
+        await ensure_schema_upgrades_async(db)
 
         await db.commit()
 

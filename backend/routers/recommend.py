@@ -15,7 +15,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 
-from models.user import BehaviorRecord
+from models.user import BehaviorRecord, RecommendFeedbackEvent
 from routers.auth import get_current_user
 from database import DB_PATH
 from algorithms.hybrid_recommender import HybridRecommender
@@ -163,6 +163,42 @@ async def get_collections(
 
     items = [dict(row) for row in rows]
     return {"items": items, "total": len(items)}
+
+
+@router.post("/feedback", summary="记录推荐反馈")
+async def record_feedback(
+    data: RecommendFeedbackEvent,
+    current_user: dict = Depends(get_current_user),
+):
+    """记录推荐曝光/点击/收藏/评分反馈。"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id FROM spots WHERE id = ?", (data.spot_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="景点不存在")
+
+    context = json.dumps(
+        {
+            "rec_session_id": data.rec_session_id,
+            "source": data.source,
+        },
+        ensure_ascii=False,
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO recommend_feedback (user_id, spot_id, event_type, event_value, context)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (current_user["id"], data.spot_id, data.event_type, data.score, context),
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "feedback recorded"}
 
 
 @router.post("/collect/{spot_id}", summary="收藏/取消收藏")

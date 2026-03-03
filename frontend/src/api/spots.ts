@@ -35,6 +35,37 @@ export const getCollections = (): Promise<any> => api.get('/recommend/collection
 // 收藏或取消收藏某个景点，spotId 是景点编号
 export const toggleCollection = (spotId: number): Promise<any> => api.post(`/recommend/collect/${spotId}`)
 
+// 上报推荐反馈（曝光/点击/收藏/评分）
+export const recordRecommendFeedback = (data: {
+  spot_id: number
+  event_type: 'exposure' | 'click' | 'collect' | 'rate'
+  rec_session_id?: string
+  source?: string
+  score?: number
+}): Promise<any> => api.post('/recommend/feedback', data)
+
+// ==================== 用户资料相关 API ====================
+
+// 获取当前登录用户信息
+export const getMe = (): Promise<any> => api.get('/auth/me')
+
+// 检查用户资料完善状态
+export const getProfileStatus = (): Promise<any> => api.get('/auth/me/profile-status')
+
+// 更新用户资料
+export const updateProfile = (data: any): Promise<any> => api.put('/auth/me', data)
+
+// 上传用户头像
+export const uploadAvatar = (file: File): Promise<any> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/auth/avatar', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
 // ==================== AI 聊天相关的 API ====================
 
 // 和 AI 进行普通对话

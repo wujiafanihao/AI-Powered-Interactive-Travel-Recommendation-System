@@ -7,8 +7,10 @@ TravelAI 后端入口文件
     启动服务后，浏览器打开 http://localhost:8000/docs 就能看到 API 文档。
 """
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from database import init_db_async
 from config import get_settings
@@ -66,6 +68,11 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(spots.router, prefix="/api")
 app.include_router(recommend.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+
+# 挂载本地上传静态目录，供头像 URL 直接访问
+uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 @app.get("/", tags=["系统"])

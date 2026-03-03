@@ -212,80 +212,65 @@
       </el-tooltip>
     </div>
 
-    <!-- 专属 AI 聊天抽屉 -->
-    <el-drawer
+    <!-- 复用型专属 AI 聊天抽屉 -->
+    <SpotAssistantDrawer
       v-model="aiChatVisible"
-      :title="`🤖 ${spot?.name} 专属导游`"
-      size="420px"
-      direction="rtl"
-      class="spot-ai-drawer"
-      :append-to-body="true"
-    >
-      <!-- AI 聊天容器 -->
-      <div class="ai-chat-container" v-loading="aiLoading">
-        <!-- 聊天消息区域 -->
-        <div class="chat-messages" ref="aiMessagesContainer">
-          <!-- 遍历所有消息 -->
-          <div v-for="(msg, index) in aiMessages" :key="index" :class="['message', msg.role]">
-            <el-avatar class="avatar" :size="36" :icon="msg.role === 'user' ? User : Service" />
-            <div class="message-content">
-              <!-- 用户消息 -->
-              <div v-if="msg.role === 'user'" class="text">{{ msg.content }}</div>
-              <!-- AI 回复，使用 marked 渲染 Markdown -->
-              <div v-else class="text ai-reply markdown-body" v-html="formatMessage(msg.content)"></div>
-            </div>
-          </div>
-          <!-- AI 正在输入的动画 -->
-          <div v-show="isReplying" class="message assistant typing">
-            <el-avatar class="avatar" :size="36" :icon="Service" />
-            <div class="message-content">
-              <div class="text">正在思考<span class="dot">...</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 输入框区域 -->
-        <div class="chat-input-area">
-          <el-input
-            v-model="aiInput"
-            type="textarea"
-            :rows="2"
-            :placeholder="`问我关于 ${spot?.name} 的问题吧...`"
-            resize="none"
-            @keyup.enter.prevent="sendAIMessage"
-            :disabled="isReplying"
-          />
-          <div class="input-actions">
-            <el-button type="primary" size="small" @click="sendAIMessage" :loading="isReplying" :disabled="!aiInput.trim()">
-              发送 <el-icon class="el-icon--right"><Promotion /></el-icon>
-            </el-button>
-          </div>
-        </div>
-      </div>
-    </el-drawer>
+      mode="spot"
+      :spot-id="spotId"
+      :title="aiDrawerTitle"
+      :welcome-message="aiWelcomeMessage"
+      :input-placeholder="aiInputPlaceholder"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 // 引入 Vue 的核心函数
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 // 引入路由
 import { useRoute, useRouter } from 'vue-router'
 // 引入 Element Plus 的消息提示
 import { ElMessage } from 'element-plus'
-// 引入 Markdown 解析库
-import { marked } from 'marked'
 // 引入 Element Plus 的图标
 import {
   Location, Calendar, MapLocation, Tickets,
   Document, Timer, Ticket, Warning,
-  Star, StarFilled, ChatDotRound, User, Headset, Service, Promotion,
+  Star, StarFilled, ChatDotRound, User, Headset,
   InfoFilled
 } from '@element-plus/icons-vue'
+
+type SpotDetailData = {
+  id: number
+  name: string
+  city?: string
+  rating?: number | string
+  image_url?: string
+  address?: string
+  suggest_time?: string
+  spot_type?: string[]
+  description?: string
+  open_time?: string
+  ticket_info?: string
+  tips?: string
+}
+
+type CollectionItem = {
+  id: number
+}
+
+type SpotComment = {
+  id: number
+  nickname?: string
+  username?: string
+  created_at: string
+  rating: number
+  content: string
+}
 // 引入 API 接口
-import { getSpotDetail, getCollections, toggleCollection, recordBehavior, getSpotComments, chatWithSpotAI } from '../../api/spots'
+import { getSpotDetail, getCollections, toggleCollection, recordBehavior, getSpotComments, recordRecommendFeedback } from '../../api/spots'
 // 引入用户状态管理
 import { useUserStore } from '../../store/user'
+import SpotAssistantDrawer from '../../components/SpotAssistantDrawer.vue'
 
 // 获取路由和路由参数
 const route = useRoute()
@@ -297,7 +282,7 @@ const spotId = Number(route.params.id)
 // 加载状态
 const loading = ref(true)
 // 景点详情数据
-const spot = ref<any>(null)
+const spot = ref<SpotDetailData | null>(null)
 // 是否已收藏
 const isCollected = ref(false)
 // 用户评分
@@ -316,9 +301,10 @@ const fetchDetail = async () => {
       checkCollection()
       recordUserBehavior('view')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取详情失败:', error)
-    if (error.response?.status === 404) {
+    const status = (error as { response?: { status?: number } })?.response?.status
+    if (status === 404) {
       ElMessage.error('景点不存在')
       router.push('/spots')
     } else {
@@ -333,7 +319,8 @@ const fetchDetail = async () => {
 const checkCollection = async () => {
   try {
     const res = await getCollections()
-    isCollected.value = res.items.some((item: any) => item.id === spotId)
+    const items = Array.isArray(res?.items) ? (res.items as CollectionItem[]) : []
+    isCollected.value = items.some((item) => item.id === spotId)
   } catch (error) {
     console.error('检查收藏状态失败:', error)
   }
@@ -350,6 +337,15 @@ const toggleCollect = async () => {
   try {
     const res = await toggleCollection(spotId)
     isCollected.value = res.collected
+    if (res.collected) {
+      recordRecommendFeedback({
+        spot_id: spotId,
+        event_type: 'collect',
+        source: 'spot-detail'
+      }).catch((error) => {
+        console.error('上报收藏反馈失败:', error)
+      })
+    }
     ElMessage.success(res.message)
   } catch (error) {
     console.error('操作失败:', error)
@@ -366,6 +362,14 @@ const handleRate = async (val: number) => {
   }
 
   recordUserBehavior('rate', val)
+  recordRecommendFeedback({
+    spot_id: spotId,
+    event_type: 'rate',
+    source: 'spot-detail',
+    score: val
+  }).catch((error) => {
+    console.error('上报评分反馈失败:', error)
+  })
   ElMessage.success('评分成功，感谢您的评价！')
 }
 
@@ -391,7 +395,7 @@ const goBack = () => {
 }
 
 // 评论相关逻辑
-const comments = ref<any[]>([])
+const comments = ref<SpotComment[]>([])
 const commentsLoading = ref(false)
 
 // 获取评论列表
@@ -414,69 +418,21 @@ const formatDate = (dateStr: string) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-// AI 聊天相关逻辑
+// AI 聊天抽屉相关逻辑（复用组件）
 const aiChatVisible = ref(false)
-const aiLoading = ref(false)
-const isReplying = ref(false)
-const aiInput = ref('')
-// AI 消息列表，初始有一条欢迎消息
-const aiMessages = ref<any[]>([
-  { role: 'assistant', content: '你好！我是这个景点的专属AI导游。有什么我可以帮你的吗？' }
-])
-const aiMessagesContainer = ref<any>(null)
-const aiSessionId = ref('')
 
-// 切换 AI 聊天抽屉显示/隐藏
 const toggleAIChat = () => {
   aiChatVisible.value = !aiChatVisible.value
 }
 
-// 使用 marked 格式化 Markdown 消息
-const formatMessage = (content: string) => {
-  return marked(content)
-}
+const aiDrawerTitle = computed(() => `🤖 ${spot.value?.name || '景点'} 专属导游`)
 
-// 滚动到聊天底部
-const scrollToBottom = async () => {
-  await nextTick()
-  if (aiMessagesContainer.value) {
-    aiMessagesContainer.value.scrollTop = aiMessagesContainer.value.scrollHeight
-  }
-}
+const aiWelcomeMessage = computed(() => {
+  const name = spot.value?.name || '这个景点'
+  return `你好！我是 ${name} 的专属AI导游。你可以问我最佳游玩路线、避坑建议、门票和交通问题。`
+})
 
-// 发送 AI 消息
-const sendAIMessage = async () => {
-  if (!aiInput.value.trim() || isReplying.value) return
-
-  const userMsg = aiInput.value.trim()
-  aiInput.value = ''
-
-  // 添加用户消息到列表
-  aiMessages.value.push({ role: 'user', content: userMsg })
-  scrollToBottom()
-
-  isReplying.value = true
-
-  try {
-    // 调用 AI 聊天 API
-    const res = await chatWithSpotAI(spotId, {
-      message: userMsg,
-      session_id: aiSessionId.value
-    })
-
-    // 保存会话 ID（用于上下文连贯）
-    aiSessionId.value = res.session_id
-    // 添加 AI 回复到列表
-    aiMessages.value.push({ role: 'assistant', content: res.reply })
-  } catch (error) {
-    console.error('发送消息失败:', error)
-    ElMessage.error('发送消息失败，请稍后重试')
-    aiMessages.value.push({ role: 'assistant', content: '抱歉，我遇到了一些问题，请稍后再试。' })
-  } finally {
-    isReplying.value = false
-    scrollToBottom()
-  }
-}
+const aiInputPlaceholder = computed(() => `问我关于 ${spot.value?.name || '该景点'} 的问题吧...`)
 
 // 清理图片 URL 的函数，去除反引号和空格
 const cleanUrl = (url: string) => {
@@ -971,132 +927,6 @@ onUnmounted(() => {
 .fab-button.active {
   background: linear-gradient(135deg, #909399 0%, #a6a9ad 100%);
   box-shadow: 0 6px 20px rgba(144, 147, 153, 0.4);
-}
-
-/* AI 抽屉样式 */
-.spot-ai-drawer :deep(.el-drawer__header) {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: white;
-  padding: 16px 20px;
-  margin-bottom: 0;
-}
-
-.spot-ai-drawer :deep(.el-drawer__body) {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.ai-chat-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.chat-messages {
-  flex: 1;
-  padding: 20px;
-  overflow-y: auto;
-  background: linear-gradient(180deg, #f5f7fa 0%, #f0f2f5 100%);
-}
-
-.message {
-  display: flex;
-  margin-bottom: 24px;
-  align-items: flex-start;
-  animation: fadeInUp 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.message.user {
-  flex-direction: row-reverse;
-}
-
-.avatar {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-}
-
-.message.assistant .avatar {
-  background: linear-gradient(135deg, #e6a23c 0%, #ebb563 100%);
-  margin-right: 12px;
-  box-shadow: 0 4px 12px rgba(230, 162, 60, 0.3);
-}
-
-.message.user .avatar {
-  background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%);
-  margin-left: 12px;
-  box-shadow: 0 4px 12px rgba(103, 194, 58, 0.3);
-}
-
-.message-content {
-  max-width: 75%;
-}
-
-.text {
-  padding: 14px 18px;
-  border-radius: 16px;
-  font-size: 14px;
-  line-height: 1.7;
-  transition: all 0.3s ease;
-}
-
-.message.user .text {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: white;
-  border-radius: 16px 4px 16px 16px;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.2);
-}
-
-.message.user .text:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.3);
-}
-
-.message.assistant .text {
-  background: white;
-  color: #303133;
-  border-radius: 4px 16px 16px 16px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-
-.message.assistant .text:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-}
-
-.typing .text {
-  color: #909399;
-  font-style: italic;
-  background: #f4f4f5;
-}
-
-.dot {
-  animation: blink 1.5s infinite;
-}
-
-@keyframes blink {
-  0% { opacity: .2; }
-  20% { opacity: 1; }
-  100% { opacity: .2; }
-}
-
-.chat-input-area {
-  padding: 16px;
-  background-color: white;
-  border-top: 1px solid #ebeef5;
-}
-
-.input-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
-/* Markdown 样式 */
-.markdown-body :deep(p) {
-  margin: 0 0 10px 0;
-}
-.markdown-body :deep(p:last-child) {
-  margin-bottom: 0;
 }
 
 /* 动画定义 */

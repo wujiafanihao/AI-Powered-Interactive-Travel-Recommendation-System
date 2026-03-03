@@ -10,9 +10,11 @@
 """
 
 import json
+import os
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from jose import JWTError, jwt
 import bcrypt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -23,6 +25,11 @@ from database import DB_PATH
 
 settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["用户认证"])
+
+# 头像上传目录：backend/uploads/avatars
+UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "avatars")
+MAX_AVATAR_SIZE = 5 * 1024 * 1024
+ALLOWED_AVATAR_CONTENT_TYPES = {"image/jpeg", "image/png"}
 
 
 def hash_password(password: str) -> str:
@@ -177,6 +184,10 @@ async def login(data: UserLogin):
             city=user.get("city"),
             travel_style=travel_style,
             accessibility=user.get("accessibility", "normal"),
+            phone=user.get("phone"),
+            bio=user.get("bio"),
+            birthday=user.get("birthday"),
+            avatar_url=user.get("avatar_url"),
         )
     )
 
@@ -198,8 +209,54 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         city=current_user.get("city"),
         travel_style=travel_style,
         accessibility=current_user.get("accessibility", "normal"),
+        phone=current_user.get("phone"),
+        bio=current_user.get("bio"),
+        birthday=current_user.get("birthday"),
+        avatar_url=current_user.get("avatar_url"),
         created_at=current_user.get("created_at"),
     )
+
+
+@router.get("/me/profile-status", summary="检查用户资料完善状态")
+async def get_profile_status(current_user: dict = Depends(get_current_user)):
+    """
+    检查用户资料是否完善
+    
+    大白话：
+    判断用户是否填写了关键信息（城市、旅行偏好等），
+    用于前端决定是否弹窗引导用户完善资料
+    """
+    travel_style = current_user.get("travel_style")
+    try:
+        travel_style_list = json.loads(travel_style or "[]")
+    except json.JSONDecodeError:
+        travel_style_list = []
+    
+    # 判断是否完善了关键信息
+    is_complete = bool(
+        current_user.get("city") and 
+        (travel_style_list and len(travel_style_list) > 0)
+    )
+    
+    # 判断是否首次登录（通过是否有行为记录判断）
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM user_behaviors WHERE user_id = ?",
+        (current_user["id"],)
+    )
+    behavior_count = cursor.fetchone()[0]
+    conn.close()
+    
+    is_first_login = behavior_count == 0
+    
+    return {
+        "is_complete": is_complete,
+        "is_first_login": is_first_login,
+        "has_city": bool(current_user.get("city")),
+        "has_travel_style": bool(travel_style_list and len(travel_style_list) > 0),
+        "behavior_count": behavior_count,
+    }
 
 
 @router.put("/me", response_model=UserResponse, summary="修改个人信息")
@@ -230,6 +287,18 @@ async def update_me(data: UserUpdate, current_user: dict = Depends(get_current_u
     if data.accessibility is not None:
         updates.append("accessibility = ?")
         params.append(data.accessibility)
+    if data.phone is not None:
+        updates.append("phone = ?")
+        params.append(data.phone)
+    if data.bio is not None:
+        updates.append("bio = ?")
+        params.append(data.bio)
+    if data.birthday is not None:
+        updates.append("birthday = ?")
+        params.append(data.birthday)
+    if data.avatar_url is not None:
+        updates.append("avatar_url = ?")
+        params.append(data.avatar_url)
 
     if updates:
         updates.append("updated_at = ?")
@@ -242,5 +311,51 @@ async def update_me(data: UserUpdate, current_user: dict = Depends(get_current_u
 
     conn.close()
 
-    # 返回更新后的信息
-    return await get_me(current_user)
+    # 返回更新后的信息（重新查库，避免返回旧数据）
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    return await get_me(dict(row))
+
+
+@router.post("/avatar", summary="上传用户头像")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """上传头像：仅支持 JPG/PNG，且文件大小不超过 5MB。"""
+    if file.content_type not in ALLOWED_AVATAR_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG 格式头像")
+
+    content = await file.read()
+    if len(content) > MAX_AVATAR_SIZE:
+        raise HTTPException(status_code=400, detail="头像文件不能超过 5MB")
+
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+    ext = ".jpg" if file.content_type == "image/jpeg" else ".png"
+    filename = f"user_{current_user['id']}_{uuid.uuid4().hex}{ext}"
+    save_path = os.path.join(UPLOADS_DIR, filename)
+
+    with open(save_path, "wb") as f:
+        f.write(content)
+
+    avatar_url = f"/uploads/avatars/{filename}"
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?",
+        (avatar_url, datetime.now().isoformat(), current_user["id"]),
+    )
+    conn.commit()
+    conn.close()
+
+    return {"avatar_url": avatar_url}

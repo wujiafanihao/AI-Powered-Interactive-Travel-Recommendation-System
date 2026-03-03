@@ -49,6 +49,12 @@ const router = createRouter({
       path: '/collections',
       name: 'collections',
       component: () => import('../views/Collections.vue')
+    },
+    {
+      // 个人资料页路径
+      path: '/profile',
+      name: 'profile',
+      component: () => import('../views/Profile.vue')
     }
   ]
 })
