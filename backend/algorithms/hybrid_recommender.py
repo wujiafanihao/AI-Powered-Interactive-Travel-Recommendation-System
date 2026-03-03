@@ -167,16 +167,39 @@ class HybridRecommender:
             """, (n,))
 
         rows = cursor.fetchall()
-        conn.close()
-
+        
+        # 计算每个景点的综合评分
         results = []
         for row in rows:
+            spot_id = row[0]
+            base_rating = row[3] if row[3] else 3.0
+            
+            # 获取评论平均评分
+            cursor.execute("""
+                SELECT AVG(rating) as avg_rating, COUNT(*) as count 
+                FROM spot_comments 
+                WHERE spot_id = ?
+            """, (spot_id,))
+            comment_result = cursor.fetchone()
+            comment_avg = comment_result[0] if comment_result[0] else None
+            
+            # 使用综合评分
+            if comment_avg:
+                composite_rating = comment_avg
+            else:
+                composite_rating = base_rating
+            
             results.append({
-                "spot_id": row[0],
-                "score": float(row[3]) / 5.0 if row[3] else 0.5,
-                "reason": f"热门推荐 - 评分高达{row[3]}分，深受游客好评",
+                "spot_id": spot_id,
+                "score": float(composite_rating) / 5.0,
+                "reason": f"热门推荐 - 评分高达{composite_rating:.1f}分，深受游客好评",
                 "source": "hot",
             })
+        
+        conn.close()
+        
+        # 按综合评分排序
+        results.sort(key=lambda x: x["score"], reverse=True)
 
         return results
 
@@ -215,6 +238,7 @@ class HybridRecommender:
         where_clause = " OR ".join(where_parts)
         params.append(n)
 
+        # 查询景点ID和原始rating，评分将在Python中计算
         cursor.execute(f"""
             SELECT id, name, city, rating, spot_type, target_group
             FROM spots 
@@ -224,18 +248,41 @@ class HybridRecommender:
         """, params)
 
         rows = cursor.fetchall()
-        conn.close()
-
+        
+        # 计算每个景点的综合评分
         results = []
         for row in rows:
+            spot_id = row[0]
+            base_rating = row[3] if row[3] else 3.0
+            
+            # 获取评论平均评分
+            cursor.execute("""
+                SELECT AVG(rating) as avg_rating, COUNT(*) as count 
+                FROM spot_comments 
+                WHERE spot_id = ?
+            """, (spot_id,))
+            comment_result = cursor.fetchone()
+            comment_avg = comment_result[0] if comment_result[0] else None
+            
+            # 使用综合评分
+            if comment_avg:
+                composite_rating = comment_avg
+            else:
+                composite_rating = base_rating
+            
             results.append({
-                "spot_id": row[0],
-                "score": float(row[3]) / 5.0 if row[3] else 0.5,
+                "spot_id": spot_id,
+                "score": float(composite_rating) / 5.0,
                 "reason": f"「{scene}」精选推荐",
                 "source": "scene",
             })
+        
+        conn.close()
+        
+        # 按综合评分排序
+        results.sort(key=lambda x: x["score"], reverse=True)
 
-        return results
+        return results[:n]
 
     def recommend(
         self,

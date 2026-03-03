@@ -22,7 +22,7 @@ router = APIRouter(prefix="/spots", tags=["景点"])
 def calculate_composite_rating(spot_id: int, conn) -> float:
     """
     计算景点的综合评分
-    综合考虑：评论评分、用户行为评分、原始基础评分
+    优先使用评论评分，如果没有评论则使用基础评分
     """
     cursor = conn.cursor()
     
@@ -41,33 +41,11 @@ def calculate_composite_rating(spot_id: int, conn) -> float:
     comment_avg = comment_result[0] if comment_result[0] else None
     comment_count = comment_result[1] if comment_result[1] else 0
     
-    # 获取用户行为评分（浏览时长、收藏等）
-    cursor.execute("""
-        SELECT AVG(rating) as avg_behavior_rating, COUNT(*) as count 
-        FROM user_behaviors 
-        WHERE spot_id = ? AND rating IS NOT NULL
-    """, (spot_id,))
-    behavior_result = cursor.fetchone()
-    behavior_avg = behavior_result[0] if behavior_result[0] else None
-    behavior_count = behavior_result[1] if behavior_result[1] else 0
-    
-    # 计算权重
-    total_weight = 1.0
-    final_rating = base_rating * 0.3  # 基础评分权重 30%
-    
+    # 优先使用评论评分
     if comment_avg and comment_count > 0:
-        comment_weight = min(0.5, 0.2 + comment_count * 0.03)  # 评论越多权重越高，最高 50%
-        final_rating += comment_avg * comment_weight
-        total_weight += comment_weight
-    
-    if behavior_avg and behavior_count > 0:
-        behavior_weight = min(0.3, 0.1 + behavior_count * 0.02)  # 行为数据权重，最高 30%
-        final_rating += behavior_avg * behavior_weight
-        total_weight += behavior_weight
-    
-    # 归一化评分到 0-5 范围
-    final_rating = final_rating / total_weight
-    final_rating = max(1.0, min(5.0, final_rating))  # 确保在 1-5 之间
+        final_rating = comment_avg
+    else:
+        final_rating = base_rating
     
     return round(final_rating, 1)
 
