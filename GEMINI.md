@@ -37,6 +37,7 @@
     - `models/`: Pydantic 请求/响应模型定义
     - `ai/`: LangChain 与意图识别逻辑（`intent_recognizer.py`, `rag_pipeline.py`）
     - `algorithms/`: 推荐算法实现（`collaborative.py`, `content_based.py`, `hybrid_recommender.py`）
+    - `scripts/`: 工具与评估脚本（包括 `evaluate_hybrid_recommender.py` 推荐系统效果评估工具，`query_user_recommendations.py` 交互式查询工具等）
     - `data/chroma_db/`: ChromaDB 向量数据库持久化目录
     - `data/travel.db`: SQLite 关系型数据库
   - `frontend/`: Vue 3 + Vite 前端目录
