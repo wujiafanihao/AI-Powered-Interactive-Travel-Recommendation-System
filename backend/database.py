@@ -315,7 +315,7 @@ async def init_db_async():
 
         # 老库补丁：补齐 users 新字段（异步版本）
         existing_columns = {
-            row[1] for row in await db.execute("PRAGMA table_info(users);")
+            row[1] for row in (await db.execute("PRAGMA table_info(users);")).fetchall()
         }
 
         required_columns = {
