@@ -381,16 +381,29 @@ class HybridRecommender:
 
         # 计算每个景点的融合分数
         merged_results = []
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT city FROM users WHERE id = ?", (user_id,))
+        user_city_row = cursor.fetchone()
+        user_city = user_city_row[0] if user_city_row else ""
+        
         for spot_id in all_spot_ids:
             cf_item = cf_results.get(spot_id)
             cb_item = cb_results.get(spot_id)
 
-            # 三路分数
             cf_score = cf_item["score"] if cf_item else 0.0
             cb_score = cb_item["score"] if cb_item else 0.0
             match_score = profile_scores.get(spot_id, 0.0)
             profile_score = match_score / 100.0
-            hybrid_score = w_cf * cf_score + w_cb * cb_score + w_profile * profile_score
+            
+            cursor.execute("SELECT city FROM spots WHERE id = ?", (spot_id,))
+            spot_city_row = cursor.fetchone()
+            spot_city = spot_city_row[0] if spot_city_row else ""
+            
+            city_bonus = 0.08 if user_city and spot_city and user_city in spot_city else 0.0
+            
+            hybrid_score = w_cf * cf_score + w_cb * cb_score + w_profile * profile_score + city_bonus
 
             # 融合推荐理由
             reasons = []
@@ -438,6 +451,7 @@ class HybridRecommender:
             )
             merged_results.extend(hot_recs)
 
+        conn.close()
         return merged_results[:n]
 
     def get_recommendation_with_details(self, user_id: int, n: int = 10) -> dict:

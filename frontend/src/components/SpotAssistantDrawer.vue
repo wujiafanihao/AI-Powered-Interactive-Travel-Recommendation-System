@@ -396,6 +396,7 @@ const sendMessage = async (e?: KeyboardEvent) => {
 </script>
 
 <style scoped>
+/* ==================== 抽屉整体 ==================== */
 .spot-assistant-drawer :deep(.el-drawer__header) {
   background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
   color: white;
@@ -413,13 +414,15 @@ const sendMessage = async (e?: KeyboardEvent) => {
   height: 100%;
 }
 
+/* ==================== 消息列表区域 ==================== */
 .assistant-messages {
   flex: 1;
-  padding: 16px;
+  padding: 16px 12px;
   overflow-y: auto;
   background: linear-gradient(180deg, #f5f7fa 0%, #f0f2f5 100%);
 }
 
+/* 每条消息 */
 .assistant-message {
   display: flex;
   margin-bottom: 18px;
@@ -430,8 +433,9 @@ const sendMessage = async (e?: KeyboardEvent) => {
   flex-direction: row-reverse;
 }
 
+/* 头像 */
 .avatar {
-  margin: 0 10px;
+  margin: 0 8px;
   flex-shrink: 0;
   background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
 }
@@ -440,15 +444,21 @@ const sendMessage = async (e?: KeyboardEvent) => {
   background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%);
 }
 
+/* ==================== 消息气泡 ==================== */
+/* 关键修复：允许消息内容占满更多宽度，避免文字过于拥挤 */
 .message-content {
-  max-width: 78%;
+  max-width: 85%;
+  min-width: 0;
 }
 
 .bubble {
   border-radius: 14px;
   padding: 12px 14px;
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 1.75;
+  /* 关键修复：确保中文和长文本正确换行 */
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .user-bubble {
@@ -461,7 +471,15 @@ const sendMessage = async (e?: KeyboardEvent) => {
   background: white;
   color: #303133;
   border-radius: 4px 14px 14px 14px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  /* 关键修复：防止内部元素溢出 */
+  overflow: hidden;
+}
+
+/* ==================== Markdown 正文 ==================== */
+.markdown-body {
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .markdown-body :deep(p) {
@@ -472,10 +490,22 @@ const sendMessage = async (e?: KeyboardEvent) => {
   margin-bottom: 0;
 }
 
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 18px;
+  margin: 4px 0 8px;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 2px;
+}
+
+/* ==================== 意图标签 ==================== */
 .intent-line {
   margin-top: 8px;
 }
 
+/* ==================== 加载 / 空 / 错误状态 ==================== */
 .cards-state {
   margin-top: 10px;
 }
@@ -503,52 +533,50 @@ const sendMessage = async (e?: KeyboardEvent) => {
   font-size: 12px;
 }
 
+/* ==================== 景点推荐卡片区域 ==================== */
 .spot-cards-section {
   margin-top: 12px;
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed #dcdfe6;
   padding-top: 12px;
 }
 
+/* 关键修复：改为纵向堆叠排列，不再横向滚动（窄抽屉内横向滚动体验差） */
 .spot-cards-scroll {
   display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 8px;
-  scroll-behavior: smooth;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.spot-cards-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-
-.spot-cards-scroll::-webkit-scrollbar-thumb {
-  background: #dcdfe6;
-  border-radius: 3px;
-}
-
+/* 关键修复：卡片占满气泡宽度，不再固定 210px */
 .spot-card {
-  flex: 0 0 210px;
+  flex: none;
+  width: 100%;
   cursor: pointer;
-  border-radius: 8px;
-  transition: transform 0.25s ease;
+  border-radius: 10px;
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+  overflow: hidden;
 }
 
 .spot-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12) !important;
 }
 
+/* 景点封面图 */
 .spot-cover {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 120px;
   object-fit: cover;
+  display: block;
 }
 
+/* 景点信息区 */
 .spot-body {
-  padding: 10px;
+  padding: 10px 12px;
 }
 
 .spot-name {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;
   color: #303133;
@@ -558,47 +586,51 @@ const sendMessage = async (e?: KeyboardEvent) => {
 }
 
 .spot-brief {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 12px;
   line-height: 1.5;
   color: #606266;
-  min-height: 36px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
+/* 城市 + 评分 */
 .spot-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
   color: #909399;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .spot-meta .city,
 .spot-meta .rating {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .spot-meta .rating {
   color: #e6a23c;
+  font-weight: 600;
 }
 
+/* 标签行 */
 .tag-row {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
 .tag-item {
   margin: 0;
+  border-radius: 4px;
 }
 
+/* ==================== 正在输入动画 ==================== */
 .typing-bubble {
   color: #909399;
   background: #f4f4f5;
@@ -610,11 +642,12 @@ const sendMessage = async (e?: KeyboardEvent) => {
 }
 
 @keyframes blink {
-  0% { opacity: .2; }
-  20% { opacity: 1; }
+  0%   { opacity: .2; }
+  20%  { opacity: 1; }
   100% { opacity: .2; }
 }
 
+/* ==================== 底部输入区域 ==================== */
 .assistant-input-area {
   padding: 14px;
   background: #fff;
