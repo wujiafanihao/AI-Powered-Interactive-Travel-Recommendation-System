@@ -48,6 +48,10 @@ CREATE_TABLES_SQL = [
         city            TEXT,
         travel_style    TEXT,
         accessibility   TEXT    DEFAULT 'normal',
+        phone           TEXT,
+        bio             TEXT,
+        avatar_url      TEXT,
+        birthday        TEXT,
         created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -162,6 +166,36 @@ CREATE_TABLES_SQL = [
         FOREIGN KEY (spot_id) REFERENCES spots(id)
     );
     """,
+
+    # -------------------- 表9: 用户扩展画像表 --------------------
+    # 存储用户长期画像和偏好信息（和 users 基础信息分离）
+    """
+    CREATE TABLE IF NOT EXISTS user_profiles (
+        user_id             INTEGER PRIMARY KEY,
+        preferred_budget    TEXT,
+        preferred_distance  TEXT,
+        preferred_season    TEXT,
+        interest_tags       TEXT,
+        updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    """,
+
+    # -------------------- 表10: 推荐反馈事件表 --------------------
+    # 存储推荐曝光、点击、跳过、转化等事件，供推荐系统学习
+    """
+    CREATE TABLE IF NOT EXISTS recommend_feedback (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id         INTEGER NOT NULL,
+        spot_id         INTEGER NOT NULL,
+        event_type      TEXT    NOT NULL,
+        event_value     REAL,
+        context         TEXT,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (spot_id) REFERENCES spots(id)
+    );
+    """,
 ]
 
 # 索引语句单独放，因为索引是用来加速查询的，和建表是两件事
@@ -186,7 +220,39 @@ CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_comments_spot ON spot_comments(spot_id);",
     # 查某个用户的评论会很快
     "CREATE INDEX IF NOT EXISTS idx_comments_user ON spot_comments(user_id);",
+    # 推荐反馈按用户查询会很快
+    "CREATE INDEX IF NOT EXISTS idx_feedback_user ON recommend_feedback(user_id);",
+    # 推荐反馈按景点查询会很快
+    "CREATE INDEX IF NOT EXISTS idx_feedback_spot ON recommend_feedback(spot_id);",
+    # 推荐反馈按事件类型查询会很快
+    "CREATE INDEX IF NOT EXISTS idx_feedback_event ON recommend_feedback(event_type);",
 ]
+
+
+def ensure_schema_upgrades(conn: sqlite3.Connection):
+    """
+    旧库升级保护：确保 users 表补齐新字段。
+
+    大白话说明：
+        老数据库如果是在新增字段之前创建的，users 表里会缺列。
+        这里通过 PRAGMA table_info 拿到现有列，再按需执行 ALTER TABLE ADD COLUMN。
+    """
+    cursor = conn.cursor()
+
+    existing_columns = {
+        row[1] for row in cursor.execute("PRAGMA table_info(users);").fetchall()
+    }
+
+    required_columns = {
+        "phone": "ALTER TABLE users ADD COLUMN phone TEXT;",
+        "bio": "ALTER TABLE users ADD COLUMN bio TEXT;",
+        "avatar_url": "ALTER TABLE users ADD COLUMN avatar_url TEXT;",
+        "birthday": "ALTER TABLE users ADD COLUMN birthday TEXT;",
+    }
+
+    for column_name, alter_sql in required_columns.items():
+        if column_name not in existing_columns:
+            cursor.execute(alter_sql)
 
 
 def init_db_sync():
@@ -218,6 +284,9 @@ def init_db_sync():
     for sql in CREATE_INDEXES_SQL:
         cursor.execute(sql)
 
+    # 老库补丁：补齐 users 新字段
+    ensure_schema_upgrades(conn)
+
     # 提交并关闭
     conn.commit()
     conn.close()
@@ -243,6 +312,22 @@ async def init_db_async():
 
         for sql in CREATE_INDEXES_SQL:
             await db.execute(sql)
+
+        # 老库补丁：补齐 users 新字段（异步版本）
+        existing_columns = {
+            row[1] for row in await db.execute("PRAGMA table_info(users);")
+        }
+
+        required_columns = {
+            "phone": "ALTER TABLE users ADD COLUMN phone TEXT;",
+            "bio": "ALTER TABLE users ADD COLUMN bio TEXT;",
+            "avatar_url": "ALTER TABLE users ADD COLUMN avatar_url TEXT;",
+            "birthday": "ALTER TABLE users ADD COLUMN birthday TEXT;",
+        }
+
+        for column_name, alter_sql in required_columns.items():
+            if column_name not in existing_columns:
+                await db.execute(alter_sql)
 
         await db.commit()
 
