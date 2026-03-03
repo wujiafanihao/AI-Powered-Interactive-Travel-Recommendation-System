@@ -52,5 +52,28 @@ api.interceptors.response.use(
   }
 )
 
+const ABSOLUTE_URL_PATTERN = /^(https?:)?\/\//i
+
+// 解析后端资源绝对地址（例如 /uploads/avatars/xxx.png）
+export const resolveApiAssetUrl = (rawPath?: string) => {
+  const value = String(rawPath || '').trim()
+  if (!value) return ''
+
+  // 已经是绝对地址或浏览器本地地址，直接返回
+  if (ABSOLUTE_URL_PATTERN.test(value) || value.startsWith('blob:') || value.startsWith('data:')) {
+    return value
+  }
+
+  const baseURL = String(api.defaults.baseURL || '').trim()
+  if (!baseURL) return value
+
+  try {
+    const origin = new URL(baseURL, window.location.origin).origin
+    return `${origin}${value.startsWith('/') ? '' : '/'}${value}`
+  } catch {
+    return value
+  }
+}
+
 // 导出配置好的 axios 实例，给其他文件用
 export default api

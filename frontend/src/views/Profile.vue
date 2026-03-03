@@ -9,7 +9,7 @@
       </template>
 
       <div class="avatar-section">
-        <el-avatar :size="96" :src="avatarPreview || userStore.userInfo.avatar_url" :icon="UserFilled" />
+        <el-avatar :size="96" :src="displayAvatarUrl" :icon="UserFilled" />
         <div class="avatar-actions">
           <el-upload
             :show-file-list="false"
@@ -114,12 +114,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, onBeforeUnmount } from 'vue'
+import { reactive, ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, UploadRequestOptions } from 'element-plus'
 import { UserFilled } from '@element-plus/icons-vue'
 import { getMe, updateProfile, uploadAvatar } from '../api/spots'
+import { resolveApiAssetUrl } from '../api/index'
 import { useUserStore } from '../store/user'
 
 const router = useRouter()
@@ -128,6 +129,11 @@ const formRef = ref<FormInstance>()
 const saving = ref(false)
 const avatarPreview = ref('')
 let currentAvatarObjectUrl = ''
+
+const displayAvatarUrl = computed(() => {
+  if (avatarPreview.value) return avatarPreview.value
+  return resolveApiAssetUrl(form.avatar_url || userStore.userInfo?.avatar_url)
+})
 
 const form = reactive<any>({
   nickname: '',

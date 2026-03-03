@@ -116,7 +116,10 @@ const handleRemove = async (spotId: number) => {
 
 // 跳转到景点详情页的函数
 const goToSpot = (id: number) => {
-  router.push(`/spot/${id}`)
+  const spotId = Number(id)
+  // 防御 NaN：无效 ID 不跳转
+  if (Number.isNaN(spotId) || spotId <= 0) return
+  router.push(`/spot/${spotId}`)
 }
 
 // 格式化景点类型的函数，将 JSON 字符串转换为可读的文本

@@ -277,8 +277,12 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-// 获取景点 ID
+// 获取景点 ID（防御 NaN：路由参数无效时跳回列表页）
 const spotId = Number(route.params.id)
+if (Number.isNaN(spotId) || spotId <= 0) {
+  ElMessage.error('景点 ID 无效')
+  router.replace('/spots')
+}
 // 加载状态
 const loading = ref(true)
 // 景点详情数据

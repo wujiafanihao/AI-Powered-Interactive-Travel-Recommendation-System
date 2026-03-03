@@ -114,7 +114,7 @@
               <!-- 评分标签 -->
               <div class="rating-badge">
                 <el-icon><StarFilled /></el-icon>
-                <span>{{ spot.rating }}</span>
+                <span>{{ formatRating(spot.rating) }}</span>
               </div>
             </div>
             <!-- 景点信息 -->
@@ -210,6 +210,16 @@ import SpotAssistantDrawer from '../../components/SpotAssistantDrawer.vue'
 const router = useRouter()
 const userStore = useUserStore()
 
+const normalizeRecommendSource = (item: any, fallback: string) => {
+  const source = String(item?.source || item?.algorithm || '').trim()
+  if (!source) return fallback
+  if (['scene', 'recommend-tab', 'spot-detail', 'ai-search'].includes(source)) return source
+  if (source === 'search') return 'ai-search'
+  if (source === 'cf') return 'collaborative'
+  if (source === 'cb') return 'content'
+  return source
+}
+
 // 状态定义
 const loading = ref(false)
 const spots = ref<any[]>([])
@@ -252,7 +262,7 @@ const loadRecommendations = async () => {
       recordRecommendFeedback({
         spot_id: spotId,
         event_type: 'exposure',
-        source: item?.source || item?.algorithm || 'recommend-tab',
+        source: normalizeRecommendSource(item, 'recommend-tab'),
         score: typeof item?.score === 'number' ? item.score : undefined
       }).catch((error) => {
         console.error('上报推荐曝光失败:', error)
@@ -356,18 +366,21 @@ const handleCurrentChange = (val: number) => {
 // 跳转到景点详情页
 const goToDetail = (id: number, item?: any) => {
   const spotId = Number(item?.spot_id || item?.id || id)
+  // 防御 NaN：如果解析出来的 spotId 无效，直接返回不跳转
+  if (Number.isNaN(spotId) || spotId <= 0) return
+
   if (userStore.token && activeTab.value === 'recommend' && spotId) {
     recordRecommendFeedback({
       spot_id: spotId,
       event_type: 'click',
-      source: item?.source || item?.algorithm || 'recommend-tab',
+      source: normalizeRecommendSource(item, 'recommend-tab'),
       score: typeof item?.score === 'number' ? item.score : undefined
     }).catch((error) => {
       console.error('上报推荐点击失败:', error)
     })
   }
 
-  router.push(`/spot/${id}`)
+  router.push(`/spot/${spotId}`)
 }
 
 // 切换列表页 AI 助手抽屉
@@ -383,9 +396,23 @@ const handleAssistantRecommendEvent = (payload: {
   const token = userStore.token || localStorage.getItem('token')
   if (!token) return
 
-  recordRecommendFeedback(payload).catch((error) => {
+  recordRecommendFeedback({
+    ...payload,
+    source: payload.source || 'ai-search'
+  }).catch((error) => {
     console.error('上报推荐反馈失败:', error)
   })
+}
+
+// 评分统一显示 1 位小数
+const formatRating = (rating: unknown) => {
+  if (rating === null || rating === undefined || rating === '') return '暂无'
+  if (typeof rating === 'number') return rating.toFixed(1)
+
+  const parsed = Number(rating)
+  if (!Number.isNaN(parsed)) return parsed.toFixed(1)
+
+  return String(rating)
 }
 
 // 清理图片 URL 的函数，去除反引号和空格

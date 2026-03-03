@@ -186,6 +186,46 @@ class UserProfileRecommender:
         finally:
             conn.close()
 
+    def recommend(self, user_id: int, n: int = 10) -> list[dict]:
+        """根据用户画像推荐景点。"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            user_profile = self._load_user_profile(cursor, user_id)
+            behavior_pref = self._load_behavior_preferences(cursor, user_id)
+
+            # 查询所有景点
+            cursor.execute("""
+                SELECT id, name, city, spot_type, target_group, suggest_season
+                FROM spots
+            """)
+            all_spots = cursor.fetchall()
+
+            # 计算每个景点的匹配分
+            scored_spots = []
+            for row in all_spots:
+                spot_id = row[0]
+                spot = {
+                    "name": row[1],
+                    "city": row[2],
+                    "spot_types": self._parse_multi_value(row[3]),
+                    "target_groups": self._parse_multi_value(row[4]),
+                    "suggest_season": row[5],
+                }
+                score = self._score(user_profile, behavior_pref, spot)
+                if score > 0:
+                    scored_spots.append({
+                        "spot_id": spot_id,
+                        "score": score,
+                        "reason": f"画像匹配度 {int(score)}%",
+                    })
+
+            # 按匹配分排序
+            scored_spots.sort(key=lambda x: x["score"], reverse=True)
+            return scored_spots[:n]
+        finally:
+            conn.close()
+
     def calculate_batch_scores(self, user_id: int, spot_ids: set[int] | list[int]) -> dict[int, float]:
         """批量计算多个景点匹配分。"""
         ids = list(spot_ids)

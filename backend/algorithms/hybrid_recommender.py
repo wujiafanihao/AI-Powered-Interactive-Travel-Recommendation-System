@@ -125,16 +125,18 @@ class HybridRecommender:
         behavior_count = cursor.fetchone()[0]
         conn.close()
 
-        w_profile = 0.25
-
         if behavior_count < 5:
-            w_cf, w_cb = 0.0, 0.75
+            # 冷启动用户：画像 + 行为偏好联合推荐，同城优先
+            w_cf, w_cb, w_profile = 0.0, 0.30, 0.70
         elif behavior_count < 20:
+            # 成长用户：画像权重从 60% 线性降到 25%
             ratio = (behavior_count - 5) / 15.0  # 0.0 ~ 1.0
             w_cf = 0.35 * ratio
-            w_cb = 1.0 - w_profile - w_cf
+            w_profile = 0.60 - (0.35 * ratio)  # 从 0.60 降到 0.25
+            w_cb = 1.0 - w_cf - w_profile
         else:
-            w_cf, w_cb = 0.55, 0.20
+            # 成熟用户：标准权重
+            w_cf, w_cb, w_profile = 0.55, 0.20, 0.25
 
         return w_cf, w_cb, w_profile
 
@@ -350,9 +352,18 @@ class HybridRecommender:
                     "reason": rec["reason"],
                 }
 
+        # 用户画像推荐（补充同城/同偏好景点）
+        profile_recs = self.profile_engine.recommend(user_id, n=n * 10)
+        profile_results = {}
+        for rec in profile_recs:
+            profile_results[rec["spot_id"]] = {
+                "score": rec.get("score", 0.0) / 100.0,  # 归一化到 0-1
+                "reason": rec.get("reason", "画像匹配推荐"),
+            }
+
         # --------- 融合三路结果（CF + CB + Profile）---------
-        # 取 CF 和 CB 的并集作为候选池
-        all_spot_ids = set(cf_results.keys()) | set(cb_results.keys())
+        # 取 CF、CB 和 Profile 的并集作为候选池
+        all_spot_ids = set(cf_results.keys()) | set(cb_results.keys()) | set(profile_results.keys())
 
         if not all_spot_ids:
             # 两个引擎都没结果（冷启动），用热门推荐兜底

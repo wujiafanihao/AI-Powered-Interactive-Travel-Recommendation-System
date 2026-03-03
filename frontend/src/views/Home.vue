@@ -26,7 +26,7 @@
           <el-dropdown>
             <span class="el-dropdown-link">
               <!-- 用户头像 -->
-              <el-avatar :size="32" :icon="User" class="avatar-icon" />
+              <el-avatar :size="32" :src="headerAvatarUrl" :icon="User" class="avatar-icon" />
               <!-- 用户名 -->
               {{ userStore.userInfo.username || '用户' }}
               <!-- 下拉箭头 -->
@@ -128,7 +128,7 @@
             <el-row :gutter="20" v-if="recommendations.length > 0">
               <!-- 遍历推荐结果，生成卡片 -->
               <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="(item, index) in recommendations" :key="index" class="recommend-col">
-                <el-card class="recommend-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(item.spot_id, item)">
+                <el-card class="recommend-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToSpot(item.spot_id || item.id, item)">
                   <!-- 推荐算法标签，悬浮在卡片左上角 -->
                   <div class="recommend-badge" :class="item.source || item.algorithm">{{ getAlgorithmName(item.source || item.algorithm) }}</div>
                   <!-- 景点图片 -->
@@ -217,7 +217,7 @@
 
 <script setup lang="ts">
 // 引入 Vue 的核心函数
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 // 引入路由，用于页面跳转
 import { useRouter } from 'vue-router'
 // 引入 Element Plus 的消息提示
@@ -237,6 +237,7 @@ const components = {
 }
 // 引入推荐相关的 API 接口
 import { getSceneRecommendations, getRecommendations, recordRecommendFeedback, getProfileStatus } from '../api/spots'
+import { resolveApiAssetUrl } from '../api/index'
 // 引入用户状态管理
 import { useUserStore } from '../store/user'
 
@@ -244,6 +245,9 @@ import { useUserStore } from '../store/user'
 const router = useRouter()
 // 获取用户状态管理实例
 const userStore = useUserStore()
+
+// 顶部导航头像地址（兼容后端返回相对路径）
+const headerAvatarUrl = computed(() => resolveApiAssetUrl(userStore.userInfo?.avatar_url))
 
 // 首次登录引导弹窗
 const profileDialogVisible = ref(false)
@@ -289,6 +293,16 @@ const scenes = [
   { name: '探险运动', icon: 'Bicycle' }
 ]
 
+const normalizeRecommendSource = (item: any, fallback: string) => {
+  const source = String(item?.source || item?.algorithm || '').trim()
+  if (!source) return fallback
+  if (['scene', 'recommend-tab', 'spot-detail', 'ai-search'].includes(source)) return source
+  if (source === 'search') return 'ai-search'
+  if (source === 'cf') return 'collaborative'
+  if (source === 'cb') return 'content'
+  return source
+}
+
 // 当前激活的场景
 const activeScene = ref('亲子游')
 // 场景景点列表
@@ -321,7 +335,7 @@ const loadSceneSpots = async (sceneName: string) => {
         recordRecommendFeedback({
           spot_id: spotId,
           event_type: 'exposure',
-          source: item?.source || item?.algorithm || 'scene',
+          source: normalizeRecommendSource(item, 'scene'),
           score: typeof item?.score === 'number' ? item.score : undefined
         }).catch((error) => {
           console.error('上报场景推荐曝光失败:', error)
@@ -358,7 +372,7 @@ const loadRecommendations = async () => {
       recordRecommendFeedback({
         spot_id: spotId,
         event_type: 'exposure',
-        source: item?.source || item?.algorithm,
+        source: normalizeRecommendSource(item, 'recommend-tab'),
         score: typeof item?.score === 'number' ? item.score : undefined
       }).catch((error) => {
         console.error('上报推荐曝光失败:', error)
@@ -379,21 +393,22 @@ const handleSceneClick = (tab: any) => {
 
 // 跳转到景点详情页的函数
 const goToSpot = (id: number, item?: any) => {
-  if (!id) return
-
   const spotId = Number(item?.spot_id || item?.id || id)
+  // 防御 NaN：如果解析出来的 spotId 无效，直接返回不跳转
+  if (Number.isNaN(spotId) || spotId <= 0) return
+
   if (userStore.token && spotId) {
     recordRecommendFeedback({
       spot_id: spotId,
       event_type: 'click',
-      source: item?.source || item?.algorithm || 'scene',
+      source: normalizeRecommendSource(item, 'scene'),
       score: typeof item?.score === 'number' ? item.score : undefined
     }).catch((e) => {
       console.error('上报推荐点击失败:', e)
     })
   }
 
-  router.push(`/spot/${id}`)
+  router.push(`/spot/${spotId}`)
 }
 
 // 退出登录的函数

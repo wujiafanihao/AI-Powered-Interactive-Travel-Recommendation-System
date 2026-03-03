@@ -280,13 +280,23 @@ const scrollToBottom = async () => {
   }
 }
 
+const normalizeRecommendSource = (source?: string, intent?: string) => {
+  const raw = String(source || intent || '').trim()
+  if (!raw) return 'ai-search'
+  if (['scene', 'recommend-tab', 'spot-detail', 'ai-search'].includes(raw)) return raw
+  if (raw === 'search') return 'ai-search'
+  if (raw === 'cf') return 'collaborative'
+  if (raw === 'cb') return 'content'
+  return raw
+}
+
 const goToSpot = (id: number, source?: string) => {
   if (!id) return
   if (!isSpotMode.value) {
     emit('recommendEvent', {
       spot_id: id,
       event_type: 'click',
-      source
+      source: normalizeRecommendSource(source)
     })
   }
   visibleProxy.value = false
@@ -326,12 +336,17 @@ const sendMessage = async (e?: KeyboardEvent) => {
     sessionId.value = res.session_id || sessionId.value
 
     const cards = normalizeSpots(res.spots)
+    const normalizedSource = normalizeRecommendSource(
+      typeof res.source === 'string' ? res.source : undefined,
+      typeof res.intent === 'string' ? res.intent : undefined
+    )
+
     const assistantMessage: ChatItem = {
       role: 'assistant',
       content: res.reply || '我整理了一些建议给你。',
       intent: res.intent,
       spots: cards,
-      source: typeof res.source === 'string' ? res.source : typeof res.intent === 'string' ? res.intent : undefined
+      source: normalizedSource
     }
 
     if (!isSpotMode.value && cards.length > 0) {

@@ -325,7 +325,10 @@ const scrollToBottom = () => {
 
 // 跳转到景点详情页
 const goToSpot = (id: number) => {
-  router.push(`/spot/${id}`)
+  const spotId = Number(id)
+  // 防御 NaN：无效 ID 不跳转
+  if (Number.isNaN(spotId) || spotId <= 0) return
+  router.push(`/spot/${spotId}`)
 }
 
 // 显示更多景点
