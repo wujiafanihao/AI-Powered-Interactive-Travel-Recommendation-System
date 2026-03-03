@@ -435,10 +435,28 @@ class HybridRecommender:
 
         spot_info = {}
         for row in cursor.fetchall():
-            spot_info[row[0]] = {
+            spot_id = row[0]
+            base_rating = row[3]
+            
+            # 获取评论平均评分
+            cursor.execute("""
+                SELECT AVG(rating) as avg_rating, COUNT(*) as count 
+                FROM spot_comments 
+                WHERE spot_id = ?
+            """, (spot_id,))
+            comment_result = cursor.fetchone()
+            comment_avg = comment_result[0] if comment_result[0] else None
+            
+            # 使用综合评分
+            if comment_avg:
+                composite_rating = comment_avg
+            else:
+                composite_rating = base_rating if base_rating else 3.0
+            
+            spot_info[spot_id] = {
                 "name": row[1],
                 "city": row[2],
-                "rating": row[3],
+                "rating": composite_rating,  # 使用综合评分
                 "image_url": row[4],
                 "spot_type": row[5],
                 "suggest_time": row[6],

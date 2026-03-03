@@ -77,6 +77,24 @@ async def get_scene_recommendations(
             FROM spots WHERE id IN ({placeholders})
         """, spot_ids)
         spot_map = {row["id"]: dict(row) for row in cursor.fetchall()}
+        
+        # 计算每个景点的综合评分
+        for spot_id in spot_ids:
+            cursor.execute("""
+                SELECT AVG(rating) as avg_rating, COUNT(*) as count 
+                FROM spot_comments 
+                WHERE spot_id = ?
+            """, (spot_id,))
+            comment_result = cursor.fetchone()
+            comment_avg = comment_result[0] if comment_result[0] else None
+            base_rating = spot_map[spot_id]["rating"] if spot_map[spot_id]["rating"] else 3.0
+            
+            # 使用综合评分
+            if comment_avg:
+                spot_map[spot_id]["composite_rating"] = comment_avg
+            else:
+                spot_map[spot_id]["composite_rating"] = base_rating
+        
         conn.close()
 
         for item in items:
@@ -84,7 +102,7 @@ async def get_scene_recommendations(
             item.update({
                 "name": info.get("name", ""),
                 "city": info.get("city", ""),
-                "rating": info.get("rating"),
+                "rating": info.get("composite_rating"),  # 使用综合评分
                 "image_url": info.get("image_url", ""),
             })
 
